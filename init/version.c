@@ -23,16 +23,6 @@ extern int version_string(LINUX_VERSION_CODE);
 int version_string(LINUX_VERSION_CODE);
 #endif
 
-#ifdef CONFIG_SPOOF_KERNEL_VERSION
-#ifdef CONFIG_SPOOF_KERNEL_VERSION_STRING
-#define UTS_RELEASE_SPOOFED CONFIG_SPOOF_KERNEL_VERSION_STRING
-#else
-#define UTS_RELEASE_SPOOFED "5.15.148-ki-kernel-v1.4"
-#endif
-#else
-#define UTS_RELEASE_SPOOFED UTS_RELEASE
-#endif
-
 struct uts_namespace init_uts_ns = {
 	.kref = KREF_INIT(2),
 	.name = {
