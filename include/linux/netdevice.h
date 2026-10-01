@@ -610,6 +610,10 @@ struct netdev_queue {
 	struct dql		dql;
 #endif
 
+#ifdef CONFIG_XDP_SOCKETS
+	struct xdp_umem		*umem;
+#endif
+
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);
@@ -731,6 +735,10 @@ struct netdev_rx_queue {
 	struct kobject			kobj;
 	struct net_device		*dev;
 	struct xdp_rxq_info		xdp_rxq;
+
+#ifdef CONFIG_XDP_SOCKETS
+	struct xdp_umem			*umem;
+#endif
 
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);
