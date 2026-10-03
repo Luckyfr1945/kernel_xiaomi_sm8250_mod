@@ -24,7 +24,6 @@
 #include <linux/irqdesc.h>
 
 #include "power.h"
-#include "boeffla_wl_blocker.h"
 
 #ifndef CONFIG_SUSPEND
 suspend_state_t pm_suspend_target_state;
@@ -1184,19 +1183,3 @@ static int __init wakeup_sources_debugfs_init(void)
 }
 
 postcore_initcall(wakeup_sources_debugfs_init);
-
-#ifdef CONFIG_BOEFFLA_WL_BLOCKER
-void boeffla_wl_blocker_relax_blocked(void)
-{
-	struct wakeup_source *ws;
-	int srcuidx;
-
-	srcuidx = srcu_read_lock(&wakeup_srcu);
-	list_for_each_entry_rcu(ws, &wakeup_sources, entry) {
-		if (ws && is_wakelock_blocked(ws->name))
-			__pm_relax(ws);
-	}
-	srcu_read_unlock(&wakeup_srcu, srcuidx);
-}
-EXPORT_SYMBOL_GPL(boeffla_wl_blocker_relax_blocked);
-#endif
