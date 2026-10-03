@@ -361,30 +361,7 @@ static void ki_profile_delayed_work_fn(struct work_struct *work)
 
 static int __init ki_profile_init(void)
 {
-	int rc;
-
-	ki_profile_kobj = kobject_create_and_add("ki_profile", kernel_kobj);
-	if (!ki_profile_kobj) {
-		pr_err("ki_profile: Failed to create kobject\n");
-		return -ENOMEM;
-	}
-
-	rc = sysfs_create_group(ki_profile_kobj, &ki_profile_attr_group);
-	if (rc) {
-		pr_err("ki_profile: Failed to create sysfs group\n");
-		kobject_put(ki_profile_kobj);
-		return rc;
-	}
-
-	INIT_DELAYED_WORK(&ki_profile_delayed_work, ki_profile_delayed_work_fn);
-	/*
-	 * Schedule delayed enforcement after 25 seconds so userspace post_boot
-	 * scripts (which overwrite schedutil and migration margins) are overridden
-	 * by Ki-Profile.
-	 */
-	schedule_delayed_work(&ki_profile_delayed_work, msecs_to_jiffies(25000));
-
-	pr_info("ki_profile: Ki-kernel Profile driver initialized (default: Balanced)\n");
+	pr_info("ki_profile: completely disabled for stability testing\n");
 	return 0;
 }
 late_initcall(ki_profile_init);
