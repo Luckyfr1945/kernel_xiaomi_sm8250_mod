@@ -100,13 +100,16 @@ echo "==========================================="
 echo "==========================================="
 echo " [*] Initializing AnyKernel3 Workspace"
 echo "==========================================="
-rm -rf anykernel
-echo "[*] Cloning AnyKernel3..."
-git clone https://github.com/AstideLabs/AnyKernel3 -b kona --single-branch --depth=1 anykernel
-echo "[+] AnyKernel3 cloned successfully."
-echo "[*] Adjusting AnyKernel3..."
-sed -i "s/^device\.name1=.*/device.name1=${DEVICE_NAME}/" anykernel/anykernel.sh
-echo "[*] AnyKernel3 adjusted successfully."
+if [ ! -d "anykernel" ] || [ ! -f "anykernel/anykernel.sh" ]; then
+    echo "[*] Cloning AnyKernel3..."
+    git clone https://github.com/AstideLabs/AnyKernel3 -b kona --single-branch --depth=1 anykernel
+    echo "[+] AnyKernel3 cloned successfully."
+    echo "[*] Adjusting AnyKernel3..."
+    sed -i "s/^device\.name1=.*/device.name1=${DEVICE_NAME}/" anykernel/anykernel.sh
+    echo "[*] AnyKernel3 adjusted successfully."
+else
+    echo "[*] Using existing configured AnyKernel3 directory."
+fi
 echo "==========================================="
 
 # ==========================================
@@ -125,12 +128,13 @@ build_target() {
         O="${OUT_DIR}"
         ARCH="${ARCH}"
         SUBARCH="${SUBARCH}"
-        LLVM=1
-        LLVM_IAS=1
         CC="ccache clang"
-        HOSTCC="ccache clang"
+        HOSTCC="${KERNEL_DIR}/tools/hostcc"
+        HOSTLD="/usr/bin/ld.bfd"
         CROSS_COMPILE="${CROSS_COMPILE}"
         CROSS_COMPILE_ARM32="${CROSS_COMPILE_ARM32}"
+        CROSS_COMPILE_COMPAT="arm-linux-gnueabi-"
+        CLANG_TRIPLE="aarch64-linux-gnu-"
     )
 
     echo "[*] Cleaning ${OUT_DIR}..."
