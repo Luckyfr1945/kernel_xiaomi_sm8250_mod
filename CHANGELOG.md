@@ -1,9 +1,26 @@
 # Ki-kernel for POCO F4 / Redmi K40S (munch)
 
-**Build Date:** 2026-10-02  
+**Build Date:** 2026-10-03  
 **Kernel Version:** Linux 4.19.325  
 **Variant:** MIUI / HyperOS & AOSP
 **Toolchain:** ZyCromerZ Clang 16.0.6 (LLVM 16.0.6 + GNU Binutils 2.47)  
+
+---
+
+## v1.4 P5 (GPU OC/UV, BBRv3, Kyber I/O & Official Naming)
+• GPU Overclock & Undervolt:
+  - Adreno 650 Overclocked to 683 MHz (`0x28b5c0c0`) on speed-bins 1, 2, and 4
+  - Applied Konabess Undervolt profile (RPMh levels 225, 129, 66, 1) across all power levels for cooler thermals and sustained high FPS
+• Networking & TCP:
+  - Restored full TCP BBRv3 with ECN response tuning, Protective Load Balancing (PLB), and fast RTT probing
+  - Enabled `CONFIG_TCP_CONG_BBR` in defconfig alongside Westwood
+• Storage & I/O:
+  - Enabled Kyber I/O Scheduler (`CONFIG_MQ_IOSCHED_KYBER`) native for UFS 3.1 multi-queue (`blk-mq`) storage
+• Kernel Identity & Release Cleanup:
+  - Restored classic Ki-kernel v1.4 name and AnyKernel3 banner
+  - Restored `build-user@build-host 4.19.404R` banner for NoKontzzzManager (NKM) detection
+  - Suppressed automatic git commit hash suffix via `.scmversion` and disabled `CONFIG_LOCALVERSION_AUTO`
+  - Removed upstream CIP/ST suffix (`-cip135-st19`) for a clean release string: `4.19.325-ki-kernel-v1.4`
 
 ---
 
