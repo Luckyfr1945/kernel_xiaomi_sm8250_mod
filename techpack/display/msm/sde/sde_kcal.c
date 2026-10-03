@@ -17,6 +17,7 @@
 #include "sde_crtc.h"
 #include "sde_hw_dspp.h"
 #include "sde_hw_ctl.h"
+#include "sde_hw_lm.h"
 #include "sde_hw_mdss.h"
 #include "sde_connector.h"
 #include "sde_kcal.h"
@@ -25,9 +26,9 @@
 
 static DEFINE_MUTEX(kcal_mutex);
 
-static bool kcal_enabled;
-static bool kcal_dirty;
-static bool kcal_restored = true;
+static bool kcal_enabled = true;
+static bool kcal_dirty = true;
+static bool kcal_restored;
 
 static u32 kcal_red = 256;
 static u32 kcal_green = 256;
@@ -40,6 +41,18 @@ static u32 kcal_hue;
 static u32 kcal_invert;
 
 static struct drm_msm_pcc kcal_pcc_cfg;
+
+static inline struct sde_kms *kcal_get_kms(struct drm_crtc *crtc)
+{
+	struct msm_drm_private *priv;
+
+	if (!crtc || !crtc->dev || !crtc->dev->dev_private)
+		return NULL;
+	priv = crtc->dev->dev_private;
+	if (!priv || !priv->kms)
+		return NULL;
+	return to_sde_kms(priv->kms);
+}
 
 static void kcal_recompute_pcc_locked(void)
 {
@@ -111,6 +124,23 @@ static void kcal_recompute_pcc_locked(void)
 		kcal_pcc_cfg.g.c = (u32)clamp_val(c_val, -32768, 32767);
 		kcal_pcc_cfg.b.c = (u32)clamp_val(c_val, -32768, 32767);
 	}
+
+	if (kcal_invert) {
+		kcal_pcc_cfg.r.r = 65535 - kcal_pcc_cfg.r.r;
+		kcal_pcc_cfg.g.g = 65535 - kcal_pcc_cfg.g.g;
+		kcal_pcc_cfg.b.b = 65535 - kcal_pcc_cfg.b.b;
+		kcal_pcc_cfg.r.c = (u32)clamp_val((s32)kcal_pcc_cfg.r.c + 32767, -32768, 32767);
+		kcal_pcc_cfg.g.c = (u32)clamp_val((s32)kcal_pcc_cfg.g.c + 32767, -32768, 32767);
+		kcal_pcc_cfg.b.c = (u32)clamp_val((s32)kcal_pcc_cfg.b.c + 32767, -32768, 32767);
+	}
+}
+
+void sde_kcal_notify_dirty(void)
+{
+	mutex_lock(&kcal_mutex);
+	if (kcal_enabled)
+		kcal_dirty = true;
+	mutex_unlock(&kcal_mutex);
 }
 
 void sde_kcal_apply(struct drm_crtc *crtc)
@@ -118,6 +148,8 @@ void sde_kcal_apply(struct drm_crtc *crtc)
 	struct sde_crtc *sde_crtc;
 	struct sde_hw_cp_cfg hw_cfg;
 	struct drm_msm_pcc identity_pcc;
+	struct sde_kms *kms;
+	struct sde_mdss_cfg *catalog;
 	u32 i, num_mixers;
 	bool apply_identity = false;
 
@@ -149,9 +181,29 @@ void sde_kcal_apply(struct drm_crtc *crtc)
 		return;
 	}
 
+	kms = kcal_get_kms(crtc);
+	if (!kms || !kms->catalog) {
+		mutex_unlock(&kcal_mutex);
+		return;
+	}
+	catalog = kms->catalog;
+
 	num_mixers = sde_crtc->num_mixers;
+	if (!num_mixers) {
+		mutex_unlock(&kcal_mutex);
+		return;
+	}
+
 	memset(&hw_cfg, 0, sizeof(hw_cfg));
 	hw_cfg.len = sizeof(struct drm_msm_pcc);
+	hw_cfg.num_of_mixers = num_mixers;
+	hw_cfg.broadcast_disabled = catalog->dma_cfg.broadcast_disabled;
+
+	for (i = 0; i < num_mixers; i++) {
+		if (i >= DSPP_MAX)
+			break;
+		hw_cfg.dspp[i] = sde_crtc->mixers[i].hw_dspp;
+	}
 
 	if (apply_identity) {
 		memset(&identity_pcc, 0, sizeof(identity_pcc));
@@ -166,20 +218,31 @@ void sde_kcal_apply(struct drm_crtc *crtc)
 	for (i = 0; i < num_mixers; i++) {
 		struct sde_hw_dspp *hw_dspp = sde_crtc->mixers[i].hw_dspp;
 		struct sde_hw_ctl *ctl = sde_crtc->mixers[i].hw_ctl;
+		struct sde_hw_mixer *hw_lm = sde_crtc->mixers[i].hw_lm;
 
-		if (!hw_dspp || !hw_dspp->ops.setup_pcc)
+		if (!hw_dspp || !hw_dspp->ops.setup_pcc || !ctl || !hw_lm)
 			continue;
+
+		hw_cfg.ctl = ctl;
+		hw_cfg.mixer_info = hw_lm;
+		hw_cfg.displayh = num_mixers * hw_lm->cfg.out_width;
+		hw_cfg.displayv = hw_lm->cfg.out_height;
+		hw_cfg.mi_dimlayer_type = sde_crtc->mi_dimlayer_type;
 
 		hw_dspp->ops.setup_pcc(hw_dspp, &hw_cfg);
 
-		if (ctl && ctl->ops.update_bitmask_dspp)
+		if (ctl->ops.update_bitmask_dspp)
 			ctl->ops.update_bitmask_dspp(ctl, hw_dspp->idx, 1);
 	}
 
-	if (apply_identity)
+	if (apply_identity) {
 		kcal_restored = true;
-	else
+		pr_info("[KCAL] reset to stock identity matrix\n");
+	} else {
 		kcal_restored = false;
+		pr_info_ratelimited("[KCAL] applied: R=%u G=%u B=%u sat=%u val=%u cont=%u\n",
+			kcal_red, kcal_green, kcal_blue, kcal_sat, kcal_val, kcal_cont);
+	}
 
 	kcal_dirty = false;
 	mutex_unlock(&kcal_mutex);
@@ -204,6 +267,8 @@ static ssize_t kcal_store(struct device *dev, struct device_attribute *attr, con
 	kcal_blue = clamp_t(u32, b, kcal_min, 256);
 	kcal_recompute_pcc_locked();
 	kcal_dirty = true;
+	kcal_enabled = true;
+	kcal_restored = false;
 	mutex_unlock(&kcal_mutex);
 
 	return count;
@@ -280,6 +345,8 @@ static ssize_t kcal_sat_store(struct device *dev, struct device_attribute *attr,
 	kcal_sat = clamp_t(u32, val, 128, 383);
 	kcal_recompute_pcc_locked();
 	kcal_dirty = true;
+	kcal_enabled = true;
+	kcal_restored = false;
 	mutex_unlock(&kcal_mutex);
 
 	return count;
@@ -302,6 +369,8 @@ static ssize_t kcal_val_store(struct device *dev, struct device_attribute *attr,
 	kcal_val = clamp_t(u32, val, 128, 383);
 	kcal_recompute_pcc_locked();
 	kcal_dirty = true;
+	kcal_enabled = true;
+	kcal_restored = false;
 	mutex_unlock(&kcal_mutex);
 
 	return count;
@@ -324,6 +393,8 @@ static ssize_t kcal_cont_store(struct device *dev, struct device_attribute *attr
 	kcal_cont = clamp_t(u32, val, 128, 383);
 	kcal_recompute_pcc_locked();
 	kcal_dirty = true;
+	kcal_enabled = true;
+	kcal_restored = false;
 	mutex_unlock(&kcal_mutex);
 
 	return count;
@@ -344,6 +415,9 @@ static ssize_t kcal_hue_store(struct device *dev, struct device_attribute *attr,
 
 	mutex_lock(&kcal_mutex);
 	kcal_hue = clamp_t(u32, val, 0, 1536);
+	kcal_dirty = true;
+	kcal_enabled = true;
+	kcal_restored = false;
 	mutex_unlock(&kcal_mutex);
 
 	return count;
@@ -364,6 +438,10 @@ static ssize_t kcal_invert_store(struct device *dev, struct device_attribute *at
 
 	mutex_lock(&kcal_mutex);
 	kcal_invert = val ? 1 : 0;
+	kcal_recompute_pcc_locked();
+	kcal_dirty = true;
+	kcal_enabled = true;
+	kcal_restored = false;
 	mutex_unlock(&kcal_mutex);
 
 	return count;
@@ -408,7 +486,12 @@ static int __init sde_kcal_init(void)
 		return ret;
 	}
 
-	pr_info("[KCAL] driver initialized successfully (default: disabled/passthrough)\n");
+	mutex_lock(&kcal_mutex);
+	kcal_recompute_pcc_locked();
+	mutex_unlock(&kcal_mutex);
+
+	pr_info("[KCAL] driver initialized successfully (default: enabled=%d, 256 256 256)\n",
+		kcal_enabled);
 	return 0;
 }
 late_initcall(sde_kcal_init);
