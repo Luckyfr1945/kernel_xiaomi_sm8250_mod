@@ -168,7 +168,8 @@ static void _ab_buslevel_update(struct kgsl_pwrctrl *pwr,
  * constraint if one exists.
  */
 static unsigned int _adjust_pwrlevel(struct kgsl_pwrctrl *pwr, int level,
-					struct kgsl_pwr_constraint *pwrc)
+					struct kgsl_pwr_constraint *pwrc,
+					int popp)
 {
 	unsigned int max_pwrlevel = max_t(unsigned int, pwr->thermal_pwrlevel,
 					pwr->max_pwrlevel);
@@ -195,6 +196,9 @@ static unsigned int _adjust_pwrlevel(struct kgsl_pwrctrl *pwr, int level,
 	}
 	break;
 	}
+
+	if (popp && (max_pwrlevel < pwr->active_pwrlevel))
+		max_pwrlevel = pwr->active_pwrlevel;
 
 	if (level < max_pwrlevel)
 		return max_pwrlevel;
@@ -576,7 +580,8 @@ unsigned int kgsl_pwrctrl_adjust_pwrlevel(struct kgsl_device *device,
 	 * Adjust the power level if required by thermal, max/min,
 	 * constraints, etc
 	 */
-	return _adjust_pwrlevel(pwr, new_level, &pwr->constraint);
+	return _adjust_pwrlevel(pwr, new_level, &pwr->constraint,
+					device->pwrscale.popp_level);
 }
 
 /**
@@ -719,7 +724,7 @@ void kgsl_pwrctrl_set_constraint(struct kgsl_device *device,
 	if (device == NULL || pwrc == NULL)
 		return;
 	constraint = _adjust_pwrlevel(&device->pwrctrl,
-				device->pwrctrl.active_pwrlevel, pwrc);
+				device->pwrctrl.active_pwrlevel, pwrc, 0);
 	pwrc_old = &device->pwrctrl.constraint;
 
 	/*
@@ -1245,46 +1250,6 @@ static ssize_t __force_on_store(struct device *dev,
 	return count;
 }
 
-/**
- * kgsl_set_performance_mode - switch GPU between extreme gaming and daily power states
- * @enable: true for extreme gaming turbo, false for balanced/battery daily profiles
- *
- * Floors Adreno 650 at powerlevel 2 (510 MHz) so clocks never drop to 150/330 MHz
- * during intense 3D scenes (WuWa/Genshin), extends idle timeout to 1000ms, forces
- * DDR AXI bus high to eliminate texture streaming hitching, and disables clock throttling.
- */
-void kgsl_set_performance_mode(bool enable)
-{
-	struct kgsl_device *device = kgsl_get_device(KGSL_DEVICE_3D0);
-	struct kgsl_pwrctrl *pwr;
-	struct adreno_device *adreno_dev;
-
-	if (!device)
-		return;
-
-	pwr = &device->pwrctrl;
-	adreno_dev = ADRENO_DEVICE(device);
-
-	mutex_lock(&device->mutex);
-	if (enable) {
-		if (pwr->num_pwrlevels >= 3)
-			pwr->min_pwrlevel = min_t(unsigned int, 2, pwr->num_pwrlevels - 2);
-		pwr->interval_timeout = 1000;
-		__force_on(device, KGSL_PWRFLAGS_AXI_ON, 1);
-		if (adreno_dev)
-			clear_bit(ADRENO_THROTTLING_CTRL, &adreno_dev->pwrctrl_flag);
-	} else {
-		pwr->min_pwrlevel = pwr->num_pwrlevels - 2;
-		pwr->interval_timeout = 80;
-		__force_on(device, KGSL_PWRFLAGS_AXI_ON, 0);
-		if (adreno_dev)
-			set_bit(ADRENO_THROTTLING_CTRL, &adreno_dev->pwrctrl_flag);
-	}
-	kgsl_pwrctrl_pwrlevel_change(device, pwr->active_pwrlevel);
-	mutex_unlock(&device->mutex);
-}
-EXPORT_SYMBOL_GPL(kgsl_set_performance_mode);
-
 static ssize_t force_clk_on_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
@@ -1364,6 +1329,116 @@ static ssize_t bus_split_store(struct device *dev,
 	mutex_unlock(&device->mutex);
 
 	return count;
+}
+
+/**
+ * kgsl_set_performance_mode - switch GPU between extreme gaming and daily power states
+ * @enable: true for extreme gaming turbo, false for balanced/battery daily profiles
+ *
+ * Floors Adreno 650 at powerlevel 2 (525 MHz on Kona) so clocks never drop to low idle
+ * during intense 3D scenes (WuWa/Genshin), extends idle timeout to 1000ms, forces
+ * DDR AXI bus high to eliminate texture streaming hitching, and disables clock throttling.
+ */
+void kgsl_set_performance_mode(bool enable)
+{
+	struct kgsl_device *device = kgsl_get_device(KGSL_DEVICE_3D0);
+	struct kgsl_pwrctrl *pwr;
+	struct adreno_device *adreno_dev;
+
+	if (!device)
+		return;
+
+	pwr = &device->pwrctrl;
+	adreno_dev = ADRENO_DEVICE(device);
+
+	mutex_lock(&device->mutex);
+	if (enable) {
+		if (pwr->num_pwrlevels >= 3)
+			pwr->min_pwrlevel = min_t(unsigned int, 2, pwr->num_pwrlevels - 2);
+		pwr->interval_timeout = 1000;
+		__force_on(device, KGSL_PWRFLAGS_AXI_ON, 1);
+		if (adreno_dev)
+			clear_bit(ADRENO_THROTTLING_CTRL, &adreno_dev->pwrctrl_flag);
+	} else {
+		pwr->min_pwrlevel = pwr->num_pwrlevels - 2;
+		pwr->interval_timeout = 80;
+		__force_on(device, KGSL_PWRFLAGS_AXI_ON, 0);
+		if (adreno_dev)
+			set_bit(ADRENO_THROTTLING_CTRL, &adreno_dev->pwrctrl_flag);
+	}
+	if (device->state == KGSL_STATE_ACTIVE)
+		kgsl_pwrctrl_pwrlevel_change(device, pwr->active_pwrlevel);
+	mutex_unlock(&device->mutex);
+}
+EXPORT_SYMBOL_GPL(kgsl_set_performance_mode);
+
+static ssize_t default_pwrlevel_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct kgsl_device *device = dev_get_drvdata(dev);
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n",
+		device->pwrctrl.default_pwrlevel);
+}
+
+static ssize_t default_pwrlevel_store(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct kgsl_device *device = dev_get_drvdata(dev);
+	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
+	struct kgsl_pwrscale *pwrscale = &device->pwrscale;
+	int ret;
+	unsigned int level = 0;
+
+	ret = kgsl_sysfs_store(buf, &level);
+	if (ret)
+		return ret;
+
+	if (level > pwr->num_pwrlevels - 2)
+		goto done;
+
+	mutex_lock(&device->mutex);
+	pwr->default_pwrlevel = level;
+	pwrscale->gpu_profile.profile.initial_freq
+			= pwr->pwrlevels[level].gpu_freq;
+
+	mutex_unlock(&device->mutex);
+done:
+	return count;
+}
+
+
+static ssize_t popp_store(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	unsigned int val = 0;
+	struct kgsl_device *device = dev_get_drvdata(dev);
+	int ret;
+
+	ret = kgsl_sysfs_store(buf, &val);
+	if (ret)
+		return ret;
+
+	mutex_lock(&device->mutex);
+	if (val)
+		set_bit(POPP_ON, &device->pwrscale.popp_state);
+	else
+		clear_bit(POPP_ON, &device->pwrscale.popp_state);
+	mutex_unlock(&device->mutex);
+
+	return count;
+}
+
+static ssize_t popp_show(struct device *dev,
+					   struct device_attribute *attr,
+					   char *buf)
+{
+	struct kgsl_device *device = dev_get_drvdata(dev);
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n",
+		test_bit(POPP_ON, &device->pwrscale.popp_state));
 }
 
 static ssize_t gpu_model_show(struct device *dev,
@@ -1570,6 +1645,8 @@ static DEVICE_ATTR_RW(force_clk_on);
 static DEVICE_ATTR_RW(force_bus_on);
 static DEVICE_ATTR_RW(force_rail_on);
 static DEVICE_ATTR_RW(bus_split);
+static DEVICE_ATTR_RW(default_pwrlevel);
+static DEVICE_ATTR_RW(popp);
 static DEVICE_ATTR_RW(force_no_nap);
 static DEVICE_ATTR_RO(gpu_model);
 static DEVICE_ATTR_RO(gpu_busy_percentage);
@@ -1597,6 +1674,8 @@ static const struct attribute *pwrctrl_attr_list[] = {
 	&dev_attr_force_rail_on.attr,
 	&dev_attr_force_no_nap.attr,
 	&dev_attr_bus_split.attr,
+	&dev_attr_default_pwrlevel.attr,
+	&dev_attr_popp.attr,
 	&dev_attr_gpu_model.attr,
 	&dev_attr_gpu_busy_percentage.attr,
 	&dev_attr_min_clock_mhz.attr,
@@ -2584,8 +2663,10 @@ static int kgsl_pwrctrl_enable(struct kgsl_device *device)
 	if (pwr->wakeup_maxpwrlevel) {
 		level = pwr->max_pwrlevel;
 		pwr->wakeup_maxpwrlevel = 0;
+	} else if (kgsl_popp_check(device)) {
+		level = pwr->active_pwrlevel;
 	} else {
-		level = pwr->num_pwrlevels - 1;
+		level = pwr->default_pwrlevel;
 	}
 
 	kgsl_pwrctrl_pwrlevel_change(device, level);
@@ -3099,6 +3180,8 @@ int kgsl_active_count_get(struct kgsl_device *device)
 	}
 	if (ret == 0)
 		atomic_inc(&device->active_cnt);
+	trace_kgsl_active_count(device,
+		(unsigned long) __builtin_return_address(0));
 	return ret;
 }
 EXPORT_SYMBOL(kgsl_active_count_get);
@@ -3137,6 +3220,9 @@ void kgsl_active_count_put(struct kgsl_device *device)
 		mod_timer(&device->idle_timer,
 			jiffies + device->pwrctrl.interval_timeout);
 	}
+
+	trace_kgsl_active_count(device,
+		(unsigned long) __builtin_return_address(0));
 
 	wake_up(&device->active_cnt_wq);
 }
@@ -3380,7 +3466,7 @@ EXPORT_SYMBOL(kgsl_pwr_limits_get_freq);
 int kgsl_pwrctrl_set_default_gpu_pwrlevel(struct kgsl_device *device)
 {
 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
-	unsigned int new_level = pwr->num_pwrlevels - 1;
+	unsigned int new_level = pwr->default_pwrlevel;
 	unsigned int old_level = pwr->active_pwrlevel;
 
 	/*

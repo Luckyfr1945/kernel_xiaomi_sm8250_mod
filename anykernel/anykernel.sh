@@ -120,64 +120,20 @@ rm -f "$AKHOME/dtbo.img" "$AKHOME/dtbo" 2>/dev/null;
 ui_print "- Flashing kernel to boot...";
 dump_boot;
 
-# Early ADB & USB Debugging injection (Android 11 - 17)
-ui_print "- Injecting Early ADB & USB Debugging...";
-patch_cmdline "androidboot.debuggable" "androidboot.debuggable=1";
-patch_cmdline "androidboot.adb" "androidboot.adb=1";
-patch_cmdline "androidboot.usbconfig" "androidboot.usbconfig=adb";
-
-for prop in default.prop prop.default system/etc/prop.default; do
-    if [ -f "$RAMDISK/$prop" ]; then
-        patch_prop "$RAMDISK/$prop" "ro.debuggable" "1";
-        patch_prop "$RAMDISK/$prop" "ro.adb.secure" "0";
-        patch_prop "$RAMDISK/$prop" "persist.sys.usb.config" "adb";
-        patch_prop "$RAMDISK/$prop" "sys.usb.config" "adb";
-    fi;
-done;
-
 if [ -d "$RAMDISK" ]; then
-    cat << 'EOF' > "$RAMDISK/init.early_adb.rc"
-on early-init
-    setprop ro.debuggable 1
-    setprop ro.adb.secure 0
-    setprop persist.sys.usb.config adb
-    setprop sys.usb.config adb
-
-on post-fs
-    setprop persist.sys.usb.config adb
-    setprop sys.usb.config adb
-    start adbd
-
-on property:sys.boot_completed=1
-    setprop persist.sys.usb.config adb
-    setprop sys.usb.config adb
-    start adbd
-EOF
-    chmod 644 "$RAMDISK/init.early_adb.rc" 2>/dev/null;
-    if [ -f "$RAMDISK/init.rc" ] && ! grep -q "init.early_adb.rc" "$RAMDISK/init.rc"; then
-        sed -i '1s;^;import /init.early_adb.rc\n;' "$RAMDISK/init.rc";
-    fi;
-
     # Ki-Profile Control Service for Root and Non-Root (Shizuku / ADB)
     cat << 'EOF' > "$RAMDISK/init.ki_profile.rc"
 on boot
     chmod 0666 /sys/kernel/ki_profile/mode
     chmod 0666 /sys/kernel/ki_profile/thermal_throttle
-    chmod 0666 /sys/kernel/ki_profile/spoof_version
     chmod 0444 /sys/kernel/ki_profile/current_profile
     chmod 0444 /sys/kernel/ki_profile/available_modes
     chown system system /sys/kernel/ki_profile/mode
     chown system system /sys/kernel/ki_profile/thermal_throttle
-    chown system system /sys/kernel/ki_profile/spoof_version
     chmod 0666 /sys/class/misc/boeffla_wakelock_blocker/wakelock_blocker
     chmod 0666 /sys/class/misc/boeffla_wakelock_blocker/default_wakelocks
     chown system system /sys/class/misc/boeffla_wakelock_blocker/wakelock_blocker
     chown system system /sys/class/misc/boeffla_wakelock_blocker/default_wakelocks
-
-# Enable kernel version spoof ONLY after full boot — prevents bootreceiver/recovery
-# from seeing the 5.15 string during early init and triggering a recovery loop.
-on property:sys.boot_completed=1
-    write /sys/kernel/ki_profile/spoof_version 1
 
 on property:persist.ki.profile=0
     write /sys/kernel/ki_profile/mode 0
