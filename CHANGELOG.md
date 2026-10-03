@@ -7,6 +7,20 @@
 
 ---
 
+## v1.4 P6 (KCAL Color Calibration & KSU Build Fix)
+• KCAL Advanced Color Calibration:
+  - Implemented guarded KCAL driver via Qualcomm SDE DSPP PCC hardware
+  - Exposes sysfs interface at `/sys/devices/platform/kcal_ctrl.0/` compatible with standard KCAL apps
+  - Supports: RGB (`kcal`), saturation (`kcal_sat`), brightness (`kcal_val`), contrast (`kcal_cont`), hue (`kcal_hue`), invert (`kcal_invert`), min value (`kcal_min`)
+  - Safety guards: skips PCC updates during FOD/HBM fingerprint overlay to prevent display freeze
+  - Disabled by default (passthrough/identity matrix) — zero overhead when off
+• KernelSU Build Fix:
+  - Switched from `CONFIG_KSU_TRACEPOINT_HOOK` to `CONFIG_KSU_MANUAL_HOOK` — tracepoint hooks only support GKI 2.0 (5.10+), not 4.19
+  - Added missing `ksu_handle_newfstat_ret` and `ksu_handle_fstat64_ret` hooks to `fs/stat.c`
+  - Fixed undefined reference to `ksu_is_init_rc_hook_enabled` in `fs/read_write.c` (SUSFS-only symbol used under wrong `#ifdef`)
+
+---
+
 ## v1.4 P5 (GPU OC/UV, BBRv3, Kyber I/O & Official Naming)
 • GPU Overclock & Undervolt:
   - Adreno 650 Overclocked to 683 MHz (`0x28b5c0c0`) on speed-bins 1, 2, and 4
