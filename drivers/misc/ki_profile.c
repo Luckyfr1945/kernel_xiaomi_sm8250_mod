@@ -241,7 +241,6 @@ static int apply_ki_profile(int mode)
 		break;
 	}
 
-	setup_per_zone_wmarks();
 	return err;
 }
 
@@ -376,8 +375,6 @@ static int __init ki_profile_init(void)
 		kobject_put(ki_profile_kobj);
 		return rc;
 	}
-
-	apply_ki_profile(current_profile_mode);
 
 	INIT_DELAYED_WORK(&ki_profile_delayed_work, ki_profile_delayed_work_fn);
 	/*
