@@ -7,6 +7,17 @@
 
 ---
 
+## v1.4 P4 (Stability Overhaul & Boot Crash Fix)
+• Fixed Boot Freeze, kpanic & Recovery Reboot on AOSP:
+  - Reverted experimental broken pipe interception (`fs/pipe.c`) to eliminate Android SystemServer & Netd IPC deadlocks
+  - Restored Qualcomm MSM `ramoops_memreserve` (4MB @ 0xb0000000) passed by Munch bootloader, preventing kernel buddy allocator from corrupting protected hardware/modem memory
+  - Defaulted Boeffla Wakelock Blocker to empty list (`""`) on boot to prevent breaking cellular network registration and `netmgr_wl`
+  - Restored stock hardware watchdog timing (20s bark / 15s pet) in device tree (`xiaomi-sm8250-common.dtsi`)
+  - Restored standard SELinux MAC handling on kernfs sysfs nodes
+  - Deferred Ki-Profile background application to 45 seconds for smooth, reliable userspace boot settlement
+
+---
+
 ## v1.4 P3 (Hotfix: Lockscreen & Display Stability)
 • Resolved Lockscreen HWUI dequeueBuffer ETIMEDOUT (-110) & 480 frames skipped freeze:
   - Reverted experimental SDE plane QoS throttling (`sde_plane.c`) to maintain continuous real-time memory bandwidth for display scanout pipes
