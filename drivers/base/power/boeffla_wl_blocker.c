@@ -24,9 +24,8 @@
 
 #define DRIVER_VERSION "1.1.0"
 
-/* Default blocked wakelocks on SM8250 known for idle drain */
-#define DEFAULT_BLOCKED_WAKELOCKS \
-	"wlan_pno_wl;wlan_extscan_wl;wlan_wow_wl;netmgr_wl;"
+/* Default blocked wakelocks: empty by default, configurable via sysfs by NKM / FKM */
+#define DEFAULT_BLOCKED_WAKELOCKS ""
 
 static char list_wl[LENGTH_LIST_WL] = {0};
 static char list_wl_default[LENGTH_LIST_WL_DEFAULT] = {0};
