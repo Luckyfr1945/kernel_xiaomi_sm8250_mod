@@ -1457,6 +1457,53 @@ struct cpufreq_governor *cpufreq_default_governor(void)
 }
 #endif
 
+int sugov_set_cluster_rate_limits(unsigned int cpu, unsigned int up_us, unsigned int down_us)
+{
+	struct sugov_cpu *sg_cpu = &per_cpu(sugov_cpu, cpu);
+	struct sugov_policy *sg_policy;
+	struct sugov_tunables *tunables;
+
+	if (!sg_cpu || !sg_cpu->sg_policy)
+		return -ENODEV;
+
+	sg_policy = sg_cpu->sg_policy;
+	tunables = sg_policy->tunables;
+	if (!tunables)
+		return -ENODEV;
+
+	tunables->up_rate_limit_us = up_us;
+	tunables->down_rate_limit_us = down_us;
+	sg_policy->up_rate_delay_ns = (u64)up_us * NSEC_PER_USEC;
+	sg_policy->down_rate_delay_ns = (u64)down_us * NSEC_PER_USEC;
+	update_min_rate_limit_ns(sg_policy);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(sugov_set_cluster_rate_limits);
+
+int sugov_set_cluster_rtg_boost(unsigned int cpu, unsigned int freq_hz)
+{
+	struct sugov_cpu *sg_cpu = &per_cpu(sugov_cpu, cpu);
+	struct sugov_policy *sg_policy;
+	struct sugov_tunables *tunables;
+	unsigned long util;
+
+	if (!sg_cpu || !sg_cpu->sg_policy)
+		return -ENODEV;
+
+	sg_policy = sg_cpu->sg_policy;
+	tunables = sg_policy->tunables;
+	if (!tunables)
+		return -ENODEV;
+
+	tunables->rtg_boost_freq = freq_hz;
+	util = target_util(sg_policy, freq_hz);
+	sg_policy->rtg_boost_util = util;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(sugov_set_cluster_rtg_boost);
+
 static int __init sugov_register(void)
 {
 	return cpufreq_register_governor(&schedutil_gov);

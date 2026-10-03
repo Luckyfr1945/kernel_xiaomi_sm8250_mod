@@ -714,3 +714,10 @@ config BOOTUP_RECLAIM
         default n
         help
           reclaim global memory when bootup
+
+config KI_PROFILE
+	tristate "Ki-kernel In-Kernel Dynamic Profile Switcher"
+	default y
+	help
+	  In-kernel dynamic profile switcher (Battery, Balanced, Performance).
+
