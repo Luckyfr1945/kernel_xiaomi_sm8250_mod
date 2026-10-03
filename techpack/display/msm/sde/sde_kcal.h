@@ -10,5 +10,6 @@
 #include <drm/drm_crtc.h>
 
 void sde_kcal_apply(struct drm_crtc *crtc);
+void sde_kcal_notify_dirty(void);
 
 #endif /* _SDE_KCAL_H_ */

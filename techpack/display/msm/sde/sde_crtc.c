@@ -4216,6 +4216,8 @@ static void sde_crtc_enable(struct drm_crtc *crtc,
 	/* Enable ESD thread */
 	for (i = 0; i < cstate->num_connectors; i++)
 		sde_connector_schedule_status_work(cstate->connectors[i], true);
+
+	sde_kcal_notify_dirty();
 }
 
 /* no input validation - caller API has all the checks */
