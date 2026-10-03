@@ -4,7 +4,7 @@
 
 ### AnyKernel setup
 properties() { '
-kernel.string=Ki-kernel AOSP SM8250 (munch)
+kernel.string=Ki-kernel v1.4
 do.devicecheck=1
 do.modules=0
 do.systemless=1

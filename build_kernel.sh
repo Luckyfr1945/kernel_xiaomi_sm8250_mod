@@ -61,6 +61,8 @@ fi
 export USE_CCACHE=1
 export CROSS_COMPILE="aarch64-linux-gnu-"
 export CROSS_COMPILE_ARM32="arm-linux-gnueabi-"
+export KBUILD_BUILD_USER="build-user"
+export KBUILD_BUILD_HOST="build-host 4.19.404R"
 
 echo "[*] Checking Clang version..."
 clang --version || { echo "[!] Clang not found at ${TOOLCHAIN_BIN}. Please check the path."; exit 1; }
@@ -302,13 +304,11 @@ build_target() {
         fi
         
         # 确定 ZIP 文件名
-        local KSU_ZIP_STR="NoKernelSU"
+        local KSU_ZIP_STR="Vanilla"
         if [ "$ENABLE_KSU" -eq 1 ]; then
-            KSU_ZIP_STR="ReSukiSU-SuSFS"
+            KSU_ZIP_STR="KSU-SUSFS"
         fi
-        local GIT_COMMIT_ID=$(git rev-parse --short=8 HEAD 2>/dev/null || echo "unknown")
-        local OS_UPPER=$(echo "$OS_TYPE" | tr '[:lower:]' '[:upper:]')
-        local ZIP_FILENAME="APTKernel_${OS_UPPER}_${DEVICE_NAME}_${KSU_ZIP_STR}_$(date +'%Y%m%d_%H%M%S')_anykernel3_${GIT_COMMIT_ID}.zip"
+        local ZIP_FILENAME="${KSU_ZIP_STR}_Ki-kernel-v1.4_${DEVICE_NAME}_$(date +'%Y%m%d_%H%M%S').zip"
         
         echo "[*] Zipping $ZIP_FILENAME ..."
         pushd anykernel > /dev/null
