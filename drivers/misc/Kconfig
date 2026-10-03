@@ -721,3 +721,17 @@ config KI_PROFILE
 	help
 	  In-kernel dynamic profile switcher (Battery, Balanced, Performance).
 
+
+config DYNAMIC_FSYNC
+	tristate "Dynamic Fsync"
+	default y
+	help
+	  Disables synchronous writes while screen is active for high flash I/O
+	  throughput, re-enables on screen sleep to guarantee data durability.
+
+config NTSYNC
+	tristate "NT synchronization primitives driver"
+	default y
+	help
+	  Fast synchronization primitives emulation driver for Windows NT on Wine/Proton/Box64.
+
