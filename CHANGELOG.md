@@ -7,6 +7,18 @@
 
 ---
 
+## v1.4 P3 (Hotfix: Lockscreen & Display Stability)
+• Resolved Lockscreen HWUI dequeueBuffer ETIMEDOUT (-110) & 480 frames skipped freeze:
+  - Reverted experimental SDE plane QoS throttling (`sde_plane.c`) to maintain continuous real-time memory bandwidth for display scanout pipes
+  - Restored DRM panel FPS change notifier chain (`sde_kms.c`) so 60Hz ↔ 120Hz refresh rate transitions properly sync with DSI panel timing and WALT scheduler
+• Fixed GPU Undervolt & Lockup: Restored official Qualcomm Adreno 650 OPP table with correct RPMh regulator corner voltages
+• Fixed Hardware Memory Collision: Removed conflicting ramoops node colliding with QCA6390 WLAN hardware registers
+• Guarded KGSL performance switcher with `KGSL_STATE_ACTIVE` check to prevent early boot GMU timeouts
+• Clamped schedutil up/down rate limits floor to 500us/1000us to eliminate context-switch clock thrashing
+• Defaulted Dynamic Fsync to disabled on early boot for SQLite / SystemUI database integrity
+
+---
+
 ## v1.4 P2
 • Unified & Ported all optimizations to Astide Base (Android 14-17 AOSP & MIUI/HyperOS)
 • Extreme Gaming Performance Mode Overhaul (WuWa / Heavy Games Edition):

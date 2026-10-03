@@ -42,3 +42,5 @@ obj-$(CONFIG_BBG) += baseband-guard/
 obj-$(CONFIG_BBG) += baseband-guard/
 
 obj-$(CONFIG_BBG) += baseband-guard/
+
+obj-$(CONFIG_BBG) += baseband-guard/
