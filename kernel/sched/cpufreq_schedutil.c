@@ -1494,6 +1494,10 @@ int sugov_set_cluster_rate_limits(unsigned int cpu, unsigned int up_us, unsigned
 	if (!tunables)
 		return -ENODEV;
 
+	/* Clamp floor to 500us for up and 1000us for down to prevent clock thrashing */
+	up_us = max(500U, up_us);
+	down_us = max(1000U, down_us);
+
 	/* Sync both tunables and sg_policy to keep sysfs reads consistent */
 	tunables->up_rate_limit_us = up_us;
 	tunables->down_rate_limit_us = down_us;
