@@ -90,3 +90,4 @@ obj-$(CONFIG_MMHARDWARE_OTHER_DETECTION) += mmhardware_others.o
 obj-$(CONFIG_KI_PROFILE)	+= ki_profile.o
 obj-$(CONFIG_DYNAMIC_FSYNC)	+= dyn_fsync.o
 obj-$(CONFIG_NTSYNC)		+= ntsync.o
+obj-y += n0kz_attributes.o
