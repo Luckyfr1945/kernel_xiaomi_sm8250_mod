@@ -33,6 +33,7 @@
 #include <linux/cpu_cooling.h>
 #include <linux/energy_model.h>
 #include <linux/of_device.h>
+#include <linux/ki_profile.h>
 
 #include <trace/events/thermal.h>
 
@@ -128,7 +129,7 @@ static int cpufreq_thermal_notifier(struct notifier_block *nb,
 	unsigned long clipped_freq = ULONG_MAX, floor_freq = 0;
 	struct cpufreq_cooling_device *cpufreq_cdev;
 
-#ifndef CONFIG_MACH_XIAOMI
+#ifndef CONFIG_BOARD_XIAOMI
 	if (event != CPUFREQ_INCOMPATIBLE)
 #else
 	if (event != CPUFREQ_THERMAL)
@@ -437,6 +438,10 @@ static int cpufreq_set_cur_state(struct thermal_cooling_device *cdev,
 
 	/* Check if the old cooling action is same as new cooling action */
 	if (cpufreq_cdev->cpufreq_state == state)
+		return 0;
+
+	/* Ki-Profile Gaming Turbo: Do not clamp CPU frequencies during performance mode */
+	if (unlikely(!ki_thermal_throttle_enabled && state > 0))
 		return 0;
 
 	clip_freq = get_state_freq(cpufreq_cdev, state);

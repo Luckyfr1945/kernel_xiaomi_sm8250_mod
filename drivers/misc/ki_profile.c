@@ -64,6 +64,10 @@ static int apply_ki_profile(int mode)
 		sugov_set_cluster_rtg_boost(0, 0);
 		sugov_set_cluster_rtg_boost(4, 0);
 		sugov_set_cluster_rtg_boost(7, 0);
+		sugov_set_cluster_hispeed(0, 0, 85);
+		sugov_set_cluster_hispeed(4, 0, 85);
+		sugov_set_cluster_hispeed(7, 0, 85);
+		kgsl_set_performance_mode(false);
 		/* High migration margin → stay on Silver for light tasks */
 		sched_set_updown_migrate(92, 85);
 		sched_set_group_updown_migrate(100, 95);
@@ -107,6 +111,10 @@ static int apply_ki_profile(int mode)
 		sugov_set_cluster_rtg_boost(0, 0);
 		sugov_set_cluster_rtg_boost(4, 0);
 		sugov_set_cluster_rtg_boost(7, 0);
+		sugov_set_cluster_hispeed(0, 0, 85);
+		sugov_set_cluster_hispeed(4, 0, 85);
+		sugov_set_cluster_hispeed(7, 0, 85);
+		kgsl_set_performance_mode(false);
 		/* Balanced migration: light tasks on Silver, bursts assist on Gold */
 		sched_set_updown_migrate(85, 75);
 		sched_set_group_updown_migrate(100, 95);
@@ -130,33 +138,41 @@ static int apply_ki_profile(int mode)
 	case KI_PROFILE_PERFORMANCE:
 		/*
 		 * Silver, Gold, Prime: 0us up delay (instant boost to top speed).
-		 * 15000us (15ms) down hold: holds frequencies across consecutive frame
+		 * 25000us (25ms) down hold: holds frequencies across consecutive frame
 		 * rendering intervals (8.3ms for 120Hz, 11.1ms for 90Hz, 16.6ms for 60Hz),
 		 * completely eliminating micro-stutters and mid-game FPS dips!
 		 */
-		ret = sugov_set_cluster_rate_limits(0, 0, 15000);
+		ret = sugov_set_cluster_rate_limits(0, 0, 25000);
 		if (ret) {
 			pr_warn("ki_profile: cpu0 sugov not ready (%d), cpufreq limits skipped\n", ret);
 			err |= 1;
 		}
-		ret = sugov_set_cluster_rate_limits(4, 0, 15000);
+		ret = sugov_set_cluster_rate_limits(4, 0, 25000);
 		if (ret) {
 			pr_warn("ki_profile: cpu4 sugov not ready (%d), cpufreq limits skipped\n", ret);
 			err |= 2;
 		}
-		ret = sugov_set_cluster_rate_limits(7, 0, 15000);
+		ret = sugov_set_cluster_rate_limits(7, 0, 25000);
 		if (ret) {
 			pr_warn("ki_profile: cpu7 sugov not ready (%d), cpufreq limits skipped\n", ret);
 			err |= 4;
 		}
 
 		/*
-		 * WALT RTG Turbo Boost (Mentok):
-		 * Boosts foreground top-app / gaming render threads immediately
-		 * to max cluster frequencies.
+		 * Instant Snap Hispeed (Game Boost without RTG dependency):
+		 * When any cluster load crosses 35-40%, snaps directly to max turbo.
 		 * Silver: 1.80 GHz max (1804800 kHz)
 		 * Gold:   2.42 GHz max (2419200 kHz)
 		 * Prime:  3.19 GHz max turbo (3187200 kHz)
+		 */
+		sugov_set_cluster_hispeed(0, 1804800, 40);
+		sugov_set_cluster_hispeed(4, 2419200, 35);
+		sugov_set_cluster_hispeed(7, 3187200, 35);
+
+		/*
+		 * WALT RTG Turbo Boost (Mentok):
+		 * Boosts foreground top-app / gaming render threads immediately
+		 * to max cluster frequencies if marked by RTG.
 		 */
 		sugov_set_cluster_rtg_boost(0, 1804800);
 		sugov_set_cluster_rtg_boost(4, 2419200);
@@ -171,11 +187,16 @@ static int apply_ki_profile(int mode)
 		sched_set_group_updown_migrate(50, 30);
 
 		/*
-		 * Full Throttle Boost:
-		 * Enables core_ctl boost (unisolate all 8 cores) and WALT frequency
-		 * aggregation for instant dual/multi-core turbo spikes.
+		 * Full Throttle Boost & Core Revive:
+		 * Unisolate all 8 cores and enable WALT frequency aggregation
+		 * for instant dual/multi-core turbo spikes.
 		 */
 		sched_set_boost(1);
+		{
+			int cpu;
+			for_each_possible_cpu(cpu)
+				sched_unisolate_cpu(cpu);
+		}
 
 		/*
 		 * WINDOW_STATS_MAX (1):
@@ -186,11 +207,20 @@ static int apply_ki_profile(int mode)
 
 		/*
 		 * Thermal Throttling Bypass (Gaming Unlocked):
-		 * Bypasses thermal drops on CPU and GPU so 3.19GHz Prime and 683/800MHz
+		 * Bypasses thermal drops on CPU and GPU so 3.19GHz Prime and 683MHz
 		 * GPU stay locked without dropping FPS. Critical emergency shutdown
 		 * remains intact for hardware safety.
 		 */
 		ki_thermal_throttle_enabled = false;
+
+		/*
+		 * GPU Extreme Gaming Turbo (Adreno 650 Mentok):
+		 * - Floor GPU clock at 510 MHz (never drops to 150/330 MHz).
+		 * - Keep DDR AXI bus locked open (eliminates texture streaming hitching).
+		 * - Disable internal Adreno cycle-skipping clock throttling.
+		 * - Idle timeout 1000ms.
+		 */
+		kgsl_set_performance_mode(true);
 
 #ifdef CONFIG_DYNAMIC_FSYNC
 		/* Bypasses synchronous filesystem stalls while screen is ON */
@@ -203,13 +233,13 @@ static int apply_ki_profile(int mode)
 		 * - watermark_scale_factor 25: large free memory buffer prevents mid-game
 		 *   direct reclaim freezes and hitching.
 		 * - watermark_boost_factor 0: prevents kswapd stall storms.
-		 * - vfs_cache_pressure 40: keeps game textures, shaders, and dentries in RAM.
+		 * - vfs_cache_pressure 100: balanced reclamation prevents memory starvation in 4GB+ games.
 		 */
 		vm_swappiness = 90;
 		watermark_scale_factor = 25;
 		watermark_boost_factor = 0;
 		sysctl_compact_unevictable_allowed = 0;
-		sysctl_vfs_cache_pressure = 40;
+		sysctl_vfs_cache_pressure = 100;
 		pr_info("ki_profile: Performance profile active (Mentok Extreme Gaming Turbo — 120FPS Locked!)\n");
 		break;
 	}

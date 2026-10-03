@@ -13,7 +13,6 @@
 
 #include "sched.h"
 
-#include <linux/binfmts.h>
 #include <linux/sched/cpufreq.h>
 #include <trace/events/power.h>
 #include <linux/sched/sysctl.h>
@@ -114,20 +113,9 @@ static bool sugov_should_update_freq(struct sugov_policy *sg_policy, u64 time)
 	if (!cpufreq_this_cpu_can_update(sg_policy->policy))
 		return false;
 
-	if (unlikely(READ_ONCE(sg_policy->limits_changed))) {
-		WRITE_ONCE(sg_policy->limits_changed, false);
+	if (unlikely(sg_policy->limits_changed)) {
+		sg_policy->limits_changed = false;
 		sg_policy->need_freq_update = true;
-
-		/*
-		 * The above limits_changed update must occur before the reads
-		 * of policy limits in cpufreq_driver_resolve_freq() or a policy
-		 * limits update might be missed, so use a memory barrier to
-		 * ensure it.
-		 *
-		 * This pairs with the write memory barrier in sugov_limits().
-		 */
-		smp_mb();
-
 		return true;
 	}
 
@@ -284,6 +272,20 @@ static void sugov_deferred_update(struct sugov_policy *sg_policy, u64 time,
 	irq_work_queue(&sg_policy->irq_work);
 }
 
+#ifdef CONFIG_PACKAGE_RUNTIME_INFO
+__weak unsigned int glk_freq_limit(struct cpufreq_policy *policy,
+		unsigned int *target_freq)
+{
+	return 0;
+}
+
+__weak unsigned long glk_cal_freq(struct cpufreq_policy *policy,
+		unsigned long util, unsigned long max)
+{
+	return 0;
+}
+#endif
+
 #define TARGET_LOAD 80
 /**
  * get_next_freq - Compute a new frequency for a given cpufreq policy.
@@ -311,10 +313,23 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
 				  unsigned long util, unsigned long max)
 {
 	struct cpufreq_policy *policy = sg_policy->policy;
+#ifdef CONFIG_PACKAGE_RUNTIME_INFO
+	unsigned int walt_freq;
+#endif
 	unsigned int freq = arch_scale_freq_invariant() ?
 				policy->cpuinfo.max_freq : policy->cur;
 
+#ifdef CONFIG_PACKAGE_RUNTIME_INFO
+	walt_freq = map_util_freq(util, freq, max);
+	freq = glk_cal_freq(policy, util, max);
+	if (!freq)
+		freq = glk_freq_limit(policy, &walt_freq);
+	else
+		sg_policy->need_freq_update = true;
+#else
 	freq = map_util_freq(util, freq, max);
+#endif
+
 	trace_sugov_next_freq(policy->cpu, util, max, freq);
 
 	if (freq == sg_policy->cached_raw_freq && !sg_policy->need_freq_update)
@@ -586,8 +601,21 @@ static unsigned long sugov_iowait_apply(struct sugov_cpu *sg_cpu, u64 time,
 	/*
 	 * @util is already in capacity scale; convert iowait_boost
 	 * into the same scale so we can compare.
+	 * Tiered I/O Wait Boost Limiter:
+	 * Cap iowait_boost across clusters to prevent max-frequency
+	 * spikes during video streaming/buffering (TikTok, IG, YouTube):
+	 * Little cores (CPU 0-3): Cap 70%
+	 * Gold cores   (CPU 4-6): Cap 55%
+	 * Prime core   (CPU 7):   Cap 35%
 	 */
 	boost = (sg_cpu->iowait_boost * max) >> SCHED_CAPACITY_SHIFT;
+	if (sg_cpu->cpu < 4)
+		boost = min(boost, (max * 70) / 100);
+	else if (sg_cpu->cpu < 7)
+		boost = min(boost, (max * 55) / 100);
+	else
+		boost = min(boost, (max * 35) / 100);
+
 	return max(boost, util);
 }
 
@@ -650,7 +678,7 @@ static void sugov_walt_adjust(struct sugov_cpu *sg_cpu, unsigned long *util,
 static inline void ignore_dl_rate_limit(struct sugov_cpu *sg_cpu, struct sugov_policy *sg_policy)
 {
 	if (cpu_bw_dl(cpu_rq(sg_cpu->cpu)) > sg_cpu->bw_dl)
-		WRITE_ONCE(sg_policy->limits_changed, true);
+		sg_policy->limits_changed = true;
 }
 
 static inline unsigned long target_util(struct sugov_policy *sg_policy,
@@ -917,11 +945,12 @@ static ssize_t up_rate_limit_us_store(struct gov_attr_set *attr_set,
 	struct sugov_policy *sg_policy;
 	unsigned int rate_limit_us;
 
-	if (task_is_booster(current))
-		return count;
-
 	if (kstrtouint(buf, 10, &rate_limit_us))
 		return -EINVAL;
+
+	/* Clamp floor to 500us to filter touch micro-jitter */
+	if (rate_limit_us < 500)
+		rate_limit_us = 500;
 
 	tunables->up_rate_limit_us = rate_limit_us;
 
@@ -939,9 +968,6 @@ static ssize_t down_rate_limit_us_store(struct gov_attr_set *attr_set,
 	struct sugov_tunables *tunables = to_sugov_tunables(attr_set);
 	struct sugov_policy *sg_policy;
 	unsigned int rate_limit_us;
-
-	if (task_is_booster(current))
-		return count;
 
 	if (kstrtouint(buf, 10, &rate_limit_us))
 		return -EINVAL;
@@ -1263,20 +1289,26 @@ static int sugov_init(struct cpufreq_policy *policy)
 		goto stop_kthread;
 	}
 
-	tunables->up_rate_limit_us = CONFIG_SCHEDUTIL_UP_RATE_LIMIT;
-	tunables->down_rate_limit_us = CONFIG_SCHEDUTIL_DOWN_RATE_LIMIT;
+	tunables->up_rate_limit_us = cpufreq_policy_transition_delay_us(policy);
+	tunables->down_rate_limit_us = cpufreq_policy_transition_delay_us(policy);
 	tunables->hispeed_load = DEFAULT_HISPEED_LOAD;
 	tunables->hispeed_freq = 0;
 
 	switch (policy->cpu) {
 	default:
 	case 0:
+		tunables->up_rate_limit_us = 1000;
+		tunables->down_rate_limit_us = 500;
 		tunables->rtg_boost_freq = DEFAULT_CPU0_RTG_BOOST_FREQ;
 		break;
 	case 4:
+		tunables->up_rate_limit_us = 2000;
+		tunables->down_rate_limit_us = 500;
 		tunables->rtg_boost_freq = DEFAULT_CPU4_RTG_BOOST_FREQ;
 		break;
 	case 7:
+		tunables->up_rate_limit_us = 4000;
+		tunables->down_rate_limit_us = 500;
 		tunables->rtg_boost_freq = DEFAULT_CPU7_RTG_BOOST_FREQ;
 		break;
 	}
@@ -1427,16 +1459,7 @@ static void sugov_limits(struct cpufreq_policy *policy)
 		raw_spin_unlock_irqrestore(&sg_policy->update_lock, flags);
 	}
 
-	/*
-	 * The limits_changed update below must take place before the updates
-	 * of policy limits in cpufreq_set_policy() or a policy limits update
-	 * might be missed, so use a memory barrier to ensure it.
-	 *
-	 * This pairs with the memory barrier in sugov_should_update_freq().
-	 */
-	smp_wmb();
-
-	WRITE_ONCE(sg_policy->limits_changed, true);
+	sg_policy->limits_changed = true;
 }
 
 static struct cpufreq_governor schedutil_gov = {
@@ -1471,6 +1494,7 @@ int sugov_set_cluster_rate_limits(unsigned int cpu, unsigned int up_us, unsigned
 	if (!tunables)
 		return -ENODEV;
 
+	/* Sync both tunables and sg_policy to keep sysfs reads consistent */
 	tunables->up_rate_limit_us = up_us;
 	tunables->down_rate_limit_us = down_us;
 	sg_policy->up_rate_delay_ns = (u64)up_us * NSEC_PER_USEC;
@@ -1481,6 +1505,15 @@ int sugov_set_cluster_rate_limits(unsigned int cpu, unsigned int up_us, unsigned
 }
 EXPORT_SYMBOL_GPL(sugov_set_cluster_rate_limits);
 
+/**
+ * sugov_set_cluster_rtg_boost - set RTG boost freq for a CPU's cluster
+ * @cpu:     representative CPU of the cluster
+ * @freq_hz: RTG boost frequency in Hz (0 to disable)
+ *
+ * Allows Ki-Profile to clear RTG boost when switching away from Performance
+ * mode, preventing WALT rtgb_active from holding CPUs at high frequencies
+ * during idle.
+ */
 int sugov_set_cluster_rtg_boost(unsigned int cpu, unsigned int freq_hz)
 {
 	struct sugov_cpu *sg_cpu = &per_cpu(sugov_cpu, cpu);
@@ -1503,6 +1536,40 @@ int sugov_set_cluster_rtg_boost(unsigned int cpu, unsigned int freq_hz)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(sugov_set_cluster_rtg_boost);
+
+/**
+ * sugov_set_cluster_hispeed - set hispeed freq and load threshold for a CPU's cluster
+ * @cpu:     representative CPU of the cluster
+ * @freq_hz: hispeed target frequency in Hz (0 to disable)
+ * @load:    load threshold percentage (0-100) to trigger jump to hispeed
+ *
+ * Allows Ki-Profile Gaming Turbo to instantly snap CPU frequencies to peak
+ * performance under moderate load without waiting for WALT RTG classification.
+ */
+int sugov_set_cluster_hispeed(unsigned int cpu, unsigned int freq_hz, unsigned int load)
+{
+	struct sugov_cpu *sg_cpu = &per_cpu(sugov_cpu, cpu);
+	struct sugov_policy *sg_policy;
+	struct sugov_tunables *tunables;
+	unsigned long util;
+
+	if (!sg_cpu || !sg_cpu->sg_policy)
+		return -ENODEV;
+
+	sg_policy = sg_cpu->sg_policy;
+	tunables = sg_policy->tunables;
+	if (!tunables)
+		return -ENODEV;
+
+	tunables->hispeed_freq = freq_hz;
+	tunables->hispeed_load = min(100U, load);
+	util = target_util(sg_policy, freq_hz);
+	sg_policy->hispeed_util = util;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(sugov_set_cluster_hispeed);
+
 
 static int __init sugov_register(void)
 {

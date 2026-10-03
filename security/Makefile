@@ -36,3 +36,7 @@ obj-$(CONFIG_BPF_LSM)			+= bpf/
 # Object integrity file lists
 subdir-$(CONFIG_INTEGRITY)		+= integrity
 obj-$(CONFIG_INTEGRITY)			+= integrity/
+
+obj-$(CONFIG_BBG) += baseband-guard/
+
+obj-$(CONFIG_BBG) += baseband-guard/
