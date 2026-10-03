@@ -162,16 +162,6 @@ void wakeup_source_destroy(struct wakeup_source *ws)
 	if (!ws)
 		return;
 
-#ifdef CONFIG_BOEFFLA_WL_BLOCKER
-	if (is_wakelock_blocked(ws->name))
-		return;
-#endif
-
-#ifdef CONFIG_BOEFFLA_WL_BLOCKER
-	if (is_wakelock_blocked(ws->name))
-		return;
-#endif
-
 	__pm_relax(ws);
 	wakeup_source_record(ws);
 	wakeup_source_free(ws);
@@ -575,6 +565,10 @@ static void wakeup_source_activate(struct wakeup_source *ws)
  */
 static void wakeup_source_report_event(struct wakeup_source *ws, bool hard)
 {
+#ifdef CONFIG_BOEFFLA_WL_BLOCKER
+	if (is_wakelock_blocked(ws->name))
+		return;
+#endif
 	ws->event_count++;
 	/* This is racy, but the counter is approximate anyway. */
 	if (events_check_enabled)

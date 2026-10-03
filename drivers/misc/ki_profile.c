@@ -67,7 +67,6 @@ static int apply_ki_profile(int mode)
 		sugov_set_cluster_hispeed(0, 0, 85);
 		sugov_set_cluster_hispeed(4, 0, 85);
 		sugov_set_cluster_hispeed(7, 0, 85);
-		kgsl_set_performance_mode(false);
 		/* High migration margin → stay on Silver for light tasks */
 		sched_set_updown_migrate(92, 85);
 		sched_set_group_updown_migrate(100, 95);
@@ -79,8 +78,8 @@ static int apply_ki_profile(int mode)
 		 * Swappiness 90 with LZ4 fast swapping ensures anonymous pages are compressed
 		 * cleanly into zRAM without holding back app memory.
 		 */
-		vm_swappiness = 90;
-		watermark_scale_factor = 12;
+		vm_swappiness = 100;
+		watermark_scale_factor = 10;
 		watermark_boost_factor = 0;
 		sysctl_compact_unevictable_allowed = 0;
 		sysctl_vfs_cache_pressure = 100;
@@ -114,7 +113,6 @@ static int apply_ki_profile(int mode)
 		sugov_set_cluster_hispeed(0, 0, 85);
 		sugov_set_cluster_hispeed(4, 0, 85);
 		sugov_set_cluster_hispeed(7, 0, 85);
-		kgsl_set_performance_mode(false);
 		/* Balanced migration: light tasks on Silver, bursts assist on Gold */
 		sched_set_updown_migrate(85, 75);
 		sched_set_group_updown_migrate(100, 95);
@@ -128,7 +126,7 @@ static int apply_ki_profile(int mode)
 		 * kswapd storms and direct reclaim freezes upon waking from deep idle.
 		 */
 		vm_swappiness = 90;
-		watermark_scale_factor = 16;
+		watermark_scale_factor = 10;
 		watermark_boost_factor = 0;
 		sysctl_compact_unevictable_allowed = 0;
 		sysctl_vfs_cache_pressure = 80;
@@ -220,7 +218,6 @@ static int apply_ki_profile(int mode)
 		 * - Disable internal Adreno cycle-skipping clock throttling.
 		 * - Idle timeout 1000ms.
 		 */
-		kgsl_set_performance_mode(true);
 
 #ifdef CONFIG_DYNAMIC_FSYNC
 		/* Bypasses synchronous filesystem stalls while screen is ON */
@@ -325,8 +322,12 @@ static struct attribute *ki_profile_attrs[] = {
 
 static umode_t ki_profile_is_visible(struct kobject *kobj, struct attribute *attr, int n)
 {
+	/*
+	 * sysfs rejects world-write (o+w) bit — max allowed is 0664.
+	 * Use 0664 so root and system can write, world can read.
+	 */
 	if (attr == &mode_attr.attr || attr == &thermal_throttle_attr.attr)
-		return 0666;
+		return 0664;
 	return attr->mode;
 }
 

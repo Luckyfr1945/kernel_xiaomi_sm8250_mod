@@ -86,11 +86,15 @@ fi
 echo "==========================================="
 echo " [*] Initializing Baseband-guard Setup"
 echo "==========================================="
-echo "[*] Downloading and running Baseband-guard remote setup script..."
-wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
+if [ ! -d "Baseband-guard" ] || [ ! -L "security/baseband-guard" ]; then
+    echo "[*] Downloading and running Baseband-guard remote setup script..."
+    wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
 
-echo "[*] Patching security/Kconfig for baseband_guard..."
-sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
+    echo "[*] Patching security/Kconfig for baseband_guard..."
+    sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/selinux/selinux,baseband_guard/ } }' security/Kconfig
+else
+    echo "[*] Baseband-guard already initialized, skipping setup."
+fi
 echo "[+] Baseband-guard setup finished."
 echo "==========================================="
 
