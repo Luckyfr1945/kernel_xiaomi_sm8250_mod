@@ -3803,6 +3803,24 @@ void sched_set_updown_migrate(unsigned int up, unsigned int down)
 }
 EXPORT_SYMBOL_GPL(sched_set_updown_migrate);
 
+void sched_set_group_updown_migrate(unsigned int up_pct, unsigned int down_pct)
+{
+	struct rq *rq;
+	unsigned long flags;
+
+	if (unlikely(num_sched_clusters <= 0))
+		return;
+
+	sysctl_sched_group_upmigrate_pct = up_pct;
+	sysctl_sched_group_downmigrate_pct = down_pct;
+
+	rq = cpu_rq(cpumask_first(cpu_possible_mask));
+	raw_spin_lock_irqsave(&rq->lock, flags);
+	walt_update_group_thresholds();
+	raw_spin_unlock_irqrestore(&rq->lock, flags);
+}
+EXPORT_SYMBOL_GPL(sched_set_group_updown_migrate);
+
 int sched_updown_migrate_handler(struct ctl_table *table, int write,
 				void __user *buffer, size_t *lenp,
 				loff_t *ppos)
