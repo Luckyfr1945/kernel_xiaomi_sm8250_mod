@@ -176,9 +176,6 @@ void sde_kcal_apply(struct drm_crtc *crtc)
 			return;
 		}
 		apply_identity = true;
-	} else if (!kcal_dirty) {
-		mutex_unlock(&kcal_mutex);
-		return;
 	}
 
 	kms = kcal_get_kms(crtc);
@@ -238,13 +235,33 @@ void sde_kcal_apply(struct drm_crtc *crtc)
 	if (apply_identity) {
 		kcal_restored = true;
 		pr_info("[KCAL] reset to stock identity matrix\n");
-	} else {
+	} else if (kcal_dirty) {
 		kcal_restored = false;
 		pr_info_ratelimited("[KCAL] applied: R=%u G=%u B=%u sat=%u val=%u cont=%u\n",
 			kcal_red, kcal_green, kcal_blue, kcal_sat, kcal_val, kcal_cont);
 	}
 
 	kcal_dirty = false;
+	mutex_unlock(&kcal_mutex);
+}
+
+void sde_kcal_modify_pcc(struct sde_crtc *sde_crtc, struct sde_hw_cp_cfg *hw_cfg)
+{
+	if (!sde_crtc || !hw_cfg)
+		return;
+
+	/* Never alter display during FOD fingerprint illumination */
+	if (sde_crtc->mi_dimlayer_type & MI_DIMLAYER_FOD_HBM_OVERLAY)
+		return;
+
+	mutex_lock(&kcal_mutex);
+	if (!kcal_enabled) {
+		mutex_unlock(&kcal_mutex);
+		return;
+	}
+
+	hw_cfg->payload = &kcal_pcc_cfg;
+	hw_cfg->payload_clear = NULL;
 	mutex_unlock(&kcal_mutex);
 }
 
