@@ -197,18 +197,18 @@ if [ -d /data/adb ]; then
     cat << 'EOF' > /data/adb/service.d/00_nkm_bypass.sh
 #!/system/bin/sh
 if [ -x /data/adb/ksu/bin/ksud ]; then
-    /data/adb/ksu/bin/ksud sepolicy patch "allow untrusted_app vendor_sysfs_battery_supply dir { search read getattr open }" 2>/dev/null
-    /data/adb/ksu/bin/ksud sepolicy patch "allow untrusted_app vendor_sysfs_battery_supply file { read getattr open }" 2>/dev/null
-    /data/adb/ksu/bin/ksud sepolicy patch "allow untrusted_app_all vendor_sysfs_battery_supply dir { search read getattr open }" 2>/dev/null
-    /data/adb/ksu/bin/ksud sepolicy patch "allow untrusted_app_all vendor_sysfs_battery_supply file { read getattr open }" 2>/dev/null
+    /data/adb/ksu/bin/ksud sepolicy patch "allow untrusted_app vendor_sysfs_battery_supply dir { search read write getattr open }" 2>/dev/null
+    /data/adb/ksu/bin/ksud sepolicy patch "allow untrusted_app vendor_sysfs_battery_supply file { read write getattr open }" 2>/dev/null
+    /data/adb/ksu/bin/ksud sepolicy patch "allow untrusted_app_all vendor_sysfs_battery_supply dir { search read write getattr open }" 2>/dev/null
+    /data/adb/ksu/bin/ksud sepolicy patch "allow untrusted_app_all vendor_sysfs_battery_supply file { read write getattr open }" 2>/dev/null
     /data/adb/ksu/bin/ksud sepolicy patch "allow system_app sysfs_ro file { read open getattr }" 2>/dev/null
     /data/adb/ksu/bin/ksud sepolicy patch "allow hal_displayfeature_xiaomi_default vendor_default_prop property_service set" 2>/dev/null
     /data/adb/ksu/bin/ksud sepolicy patch "allow platform_app vendor_display_prop file { read open getattr }" 2>/dev/null
     /data/adb/ksu/bin/ksud sepolicy patch "allow vendor_hal_perf_default system_server dir search" 2>/dev/null
 fi
 
-chmod 664 /sys/class/power_supply/battery/input_suspend 2>/dev/null
-chmod 664 /sys/class/power_supply/battery/bypass_charging 2>/dev/null
+chmod 666 /sys/class/power_supply/battery/input_suspend 2>/dev/null
+chmod 666 /sys/class/power_supply/battery/bypass_charging 2>/dev/null
 chmod 664 /sys/class/power_supply/battery/charging_limit_current 2>/dev/null
 chmod 644 /sys/class/power_supply/battery/battery_health 2>/dev/null
 chmod 644 /sys/class/power_supply/battery/battery_cycle_count 2>/dev/null

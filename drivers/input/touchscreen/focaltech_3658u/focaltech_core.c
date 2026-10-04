@@ -2327,6 +2327,22 @@ static int fts_reset_mode(int mode)
 	return 0;
 }
 
+void fts_set_game_mode(bool enable)
+{
+	if (!fts_data)
+		return;
+
+	if (enable) {
+		fts_set_cur_value(Touch_Game_Mode, 1);
+		fts_set_cur_value(Touch_Active_MODE, 1);
+		FTS_INFO("ki_profile: focaltech touch Game Mode ENABLED (low latency / high polling)\n");
+	} else {
+		fts_reset_mode(Touch_Game_Mode);
+		FTS_INFO("ki_profile: focaltech touch Game Mode DISABLED\n");
+	}
+}
+EXPORT_SYMBOL_GPL(fts_set_game_mode);
+
 static int fts_get_mode_value(int mode, int value_type)
 {
 	int value = -1;

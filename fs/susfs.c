@@ -1224,7 +1224,7 @@ out_copy_to_user:
 }
 
 /* get susfs enabled features */
-static int copy_config_to_buf(const char *config_string, char *buf_ptr, size_t *copied_size, size_t bufsize) {
+__maybe_unused static int copy_config_to_buf(const char *config_string, char *buf_ptr, size_t *copied_size, size_t bufsize) {
 	size_t tmp_size = strlen(config_string);
 
 	*copied_size += tmp_size;
@@ -1238,8 +1238,8 @@ static int copy_config_to_buf(const char *config_string, char *buf_ptr, size_t *
 
 void susfs_get_enabled_features(void __user **user_info) {
 	struct st_susfs_enabled_features *info = (struct st_susfs_enabled_features *)kzalloc(sizeof(struct st_susfs_enabled_features), GFP_KERNEL);
-	char *buf_ptr = NULL;
-	size_t copied_size = 0;
+	__maybe_unused char *buf_ptr = NULL;
+	__maybe_unused size_t copied_size = 0;
 
 	if (!info) {
 		info->err = -ENOMEM;

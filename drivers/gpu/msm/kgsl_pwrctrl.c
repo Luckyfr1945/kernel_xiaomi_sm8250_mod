@@ -878,6 +878,29 @@ static void kgsl_pwrctrl_min_pwrlevel_set(struct kgsl_device *device,
 	mutex_unlock(&device->mutex);
 }
 
+void kgsl_pwrctrl_set_performance_mode(bool enable)
+{
+	struct kgsl_device *device = kgsl_get_device(0);
+	struct kgsl_pwrctrl *pwr;
+
+	if (!device)
+		return;
+
+	pwr = &device->pwrctrl;
+
+	if (enable) {
+		/* Floor GPU to powerlevel 3 (~510MHz) to prevent frame drop under load */
+		int target_level = pwr->num_pwrlevels > 4 ? pwr->num_pwrlevels - 4 : 0;
+		kgsl_pwrctrl_min_pwrlevel_set(device, target_level);
+		pr_info("ki_profile: Adreno GPU Performance floor locked (level=%d)\n", target_level);
+	} else {
+		/* Restore default minimum powerlevel (idle down to low clock) */
+		kgsl_pwrctrl_min_pwrlevel_set(device, pwr->num_pwrlevels - 2);
+		pr_info("ki_profile: Adreno GPU Normal clock floor restored\n");
+	}
+}
+EXPORT_SYMBOL_GPL(kgsl_pwrctrl_set_performance_mode);
+
 static ssize_t min_pwrlevel_store(struct device *dev,
 				struct device_attribute *attr, const char *buf,
 				size_t count)

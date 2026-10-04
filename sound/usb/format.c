@@ -281,7 +281,10 @@ static bool focusrite_valid_sample_rate(struct snd_usb_audio *chip,
 		if (max_rate != 48000 &&
 		    max_rate != 96000 &&
 		    max_rate != 192000 &&
-		    max_rate != 384000) {
+		    max_rate != 352800 &&
+		    max_rate != 384000 &&
+		    max_rate != 705600 &&
+		    max_rate != 768000) {
 
 			usb_audio_info(chip,
 				"%u:%d : unexpected max rate: %u\n",

@@ -371,6 +371,19 @@ static int qcom_cpufreq_hw_cpu_init(struct cpufreq_policy *policy)
 
 	em_register_perf_domain(policy->cpus, ret, &em_cb);
 
+	/*
+	 * Ki-kernel: Set minimum clock for little cores (Cortex-A55, domain 0
+	 * = cpu0..3 on SM8250/kona) to 300 MHz. This is the lowest OPP
+	 * supported by the hardware and prevents the governor from going
+	 * below 300 MHz, which avoids excessive frequency transitions while
+	 * still saving power compared to a higher floor.
+	 */
+	if (policy->cpu <= 3) {
+		policy->min = 300000; /* 300 MHz in kHz */
+		pr_info("qcom-cpufreq-hw: CPU%d min freq set to 300 MHz\n",
+			policy->cpu);
+	}
+
 	if (c->dcvsh_irq > 0 && !c->is_irq_requested) {
 		snprintf(c->dcvsh_irq_name, sizeof(c->dcvsh_irq_name),
 					"dcvsh-irq-%d", policy->cpu);

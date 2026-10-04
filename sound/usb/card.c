@@ -771,7 +771,7 @@ static int usb_audio_probe(struct usb_interface *intf,
 	usb_set_intfdata(intf, chip);
 	intf->needs_remote_wakeup = 1;
 	usb_disable_lpm(chip->dev);
-	usb_enable_autosuspend(chip->dev);
+	usb_disable_autosuspend(chip->dev);
 	atomic_dec(&chip->active);
 	mutex_unlock(&register_mutex);
 	return 0;

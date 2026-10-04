@@ -8,11 +8,12 @@ set -e
 # ==========================================
 if [ -z "$1" ]; then
     echo "[!] Error: No device specified."
-    echo "Usage: $0 <device_name> [ksu] [miui|aosp]"
-    echo "Example: $0 lmi"
-    echo "         $0 lmi ksu"
-    echo "         $0 lmi ksu miui"
-    echo "         $0 lmi aosp"
+    echo "Usage: $0 <device_name> [ksu|susfs|nosusfs|vanilla] [miui|aosp]"
+    echo "Example: $0 munch aosp             # KSU + SuSFS (Default)"
+    echo "         $0 munch ksu aosp          # KSU only (No SuSFS)"
+    echo "         $0 munch nosusfs aosp      # KSU only (No SuSFS)"
+    echo "         $0 munch susfs aosp        # KSU + SuSFS"
+    echo "         $0 munch vanilla aosp      # Vanilla (No root)"
     exit 1
 fi
 
@@ -26,16 +27,33 @@ if [ ! -f "$DEFCONFIG_PATH" ]; then
     exit 1
 fi
 
-ENABLE_KSU=0
+ENABLE_KSU=1
+ENABLE_SUSFS=1
 TARGET_OS="both"
 
 shift
-# Parse remaining arguments loosely
+# Parse remaining arguments loosely (case-insensitive)
 for arg in "$@"; do
-    case "$arg" in
-        ksu) ENABLE_KSU=1 ;;
-        miui) TARGET_OS="miui" ;;
-        aosp) TARGET_OS="aosp" ;;
+    lower_arg=$(echo "$arg" | tr '[:upper:]' '[:lower:]')
+    case "$lower_arg" in
+        *nosusfs*|*no-susfs*|*no_susfs*|*ksu-only*|*only-ksu*)
+            ENABLE_KSU=1
+            ENABLE_SUSFS=0
+            ;;
+        *susfs*)
+            ENABLE_KSU=1
+            ENABLE_SUSFS=1
+            ;;
+        ksu)
+            ENABLE_KSU=1
+            ENABLE_SUSFS=0
+            ;;
+        *vanilla*|*noksu*|no-ksu|no_ksu)
+            ENABLE_KSU=0
+            ENABLE_SUSFS=0
+            ;;
+        *miui*) TARGET_OS="miui" ;;
+        *aosp*) TARGET_OS="aosp" ;;
     esac
 done
 
@@ -217,13 +235,41 @@ build_target() {
 
     # 2. KernelSU configurations
     if [ "$ENABLE_KSU" -eq 1 ]; then
-        echo "[*] Injecting KernelSU & SUSFS configurations..."
-        scripts/config --file "${OUT_DIR}/.config" \
-            -e KSU \
-            -e THREAD_INFO_IN_TASK \
-            -e KSU_SUSFS \
-            -d KSU_MANUAL_HOOK \
-            -d KSU_TRACEPOINT_HOOK
+        if [ "$ENABLE_SUSFS" -eq 1 ]; then
+            echo "[*] Injecting KernelSU + SuSFS (Full) configurations..."
+            scripts/config --file "${OUT_DIR}/.config" \
+                -e KSU \
+                -e THREAD_INFO_IN_TASK \
+                -e KSU_SUSFS \
+                -d KSU_MANUAL_HOOK \
+                -d KSU_TRACEPOINT_HOOK \
+                -e KSU_SUSFS_SUS_PATH \
+                -e KSU_SUSFS_SUS_MOUNT \
+                -e KSU_SUSFS_SUS_KSTAT \
+                -e KSU_SUSFS_SPOOF_UNAME \
+                -e KSU_SUSFS_ENABLE_LOG \
+                -e KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
+                -e KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
+                -e KSU_SUSFS_OPEN_REDIRECT \
+                -e KSU_SUSFS_SUS_MAP
+        else
+            echo "[*] Injecting KernelSU (Plain - No SuSFS features) configurations..."
+            scripts/config --file "${OUT_DIR}/.config" \
+                -e KSU \
+                -e THREAD_INFO_IN_TASK \
+                -e KSU_SUSFS \
+                -d KSU_MANUAL_HOOK \
+                -d KSU_TRACEPOINT_HOOK \
+                -d KSU_SUSFS_SUS_PATH \
+                -d KSU_SUSFS_SUS_MOUNT \
+                -d KSU_SUSFS_SUS_KSTAT \
+                -d KSU_SUSFS_SPOOF_UNAME \
+                -d KSU_SUSFS_ENABLE_LOG \
+                -d KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
+                -d KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
+                -d KSU_SUSFS_OPEN_REDIRECT \
+                -d KSU_SUSFS_SUS_MAP
+        fi
     else
         echo "[*] Disabling KernelSU..."
         scripts/config --file "${OUT_DIR}/.config" \
@@ -275,8 +321,8 @@ build_target() {
     if [ "$OS_TYPE" == "aosp" ]; then
         echo "[*] Injecting AOSP specific configurations..."
         scripts/config --file "${OUT_DIR}/.config" \
-            -e REKERNEL \
-            -e REKERNEL_NETWORK
+            -d REKERNEL \
+            -d REKERNEL_NETWORK
     fi
 
     # We always need to re-evaluate dependencies because BBG is injected unconditionally
@@ -316,9 +362,13 @@ build_target() {
         # 确定 ZIP 文件名
         local KSU_ZIP_STR="Vanilla"
         if [ "$ENABLE_KSU" -eq 1 ]; then
-            KSU_ZIP_STR="KSU-SUSFS"
+            if [ "$ENABLE_SUSFS" -eq 1 ]; then
+                KSU_ZIP_STR="KSU-SUSFS"
+            else
+                KSU_ZIP_STR="KSU"
+            fi
         fi
-        local ZIP_FILENAME="${KSU_ZIP_STR}_Ki-kernel-v1.4_${DEVICE_NAME}_$(date +'%Y%m%d_%H%M%S').zip"
+        local ZIP_FILENAME="${KSU_ZIP_STR}_Ki-kernel-v1.4_${OS_TYPE}_$(date +'%Y%m%d_%H%M%S').zip"
         
         echo "[*] Zipping $ZIP_FILENAME ..."
         pushd anykernel > /dev/null

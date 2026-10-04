@@ -36,12 +36,17 @@ extern int watermark_scale_factor;
 extern int sysctl_compact_unevictable_allowed;
 extern int sysctl_vfs_cache_pressure;
 
+void __attribute__((weak)) fts_set_game_mode(bool enable) {}
+void __attribute__((weak)) kgsl_pwrctrl_set_performance_mode(bool enable) {}
+
 static int apply_ki_profile(int mode)
 {
 	int ret, err = 0;
 
 	switch (mode) {
 	case KI_PROFILE_BATTERY:
+		fts_set_game_mode(false);
+		kgsl_pwrctrl_set_performance_mode(false);
 		/* Silver (cpu0): conservative ramp-up, 4ms hold to avoid clock thrashing */
 		ret = sugov_set_cluster_rate_limits(0, 1500, 4000);
 		if (ret) {
@@ -88,6 +93,8 @@ static int apply_ki_profile(int mode)
 
 	case KI_PROFILE_BALANCED:
 	default:
+		fts_set_game_mode(false);
+		kgsl_pwrctrl_set_performance_mode(false);
 		/* Silver (cpu0): zero ramp-up delay, 2000us down hold for snappy 120Hz */
 		ret = sugov_set_cluster_rate_limits(0, 0, 2000);
 		if (ret) {
@@ -212,12 +219,12 @@ static int apply_ki_profile(int mode)
 		ki_thermal_throttle_enabled = false;
 
 		/*
-		 * GPU Extreme Gaming Turbo (Adreno 650 Mentok):
-		 * - Floor GPU clock at 510 MHz (never drops to 150/330 MHz).
-		 * - Keep DDR AXI bus locked open (eliminates texture streaming hitching).
-		 * - Disable internal Adreno cycle-skipping clock throttling.
-		 * - Idle timeout 1000ms.
+		 * GPU & Touchscreen Extreme Gaming Turbo:
+		 * - Low touch latency & high report rate (Focaltech Touch Game Mode)
+		 * - Floor GPU clock at ~510 MHz (Adreno 650 never drops to idle 150/330 MHz under load)
 		 */
+		fts_set_game_mode(true);
+		kgsl_pwrctrl_set_performance_mode(true);
 
 #ifdef CONFIG_DYNAMIC_FSYNC
 		/* Bypasses synchronous filesystem stalls while screen is ON */

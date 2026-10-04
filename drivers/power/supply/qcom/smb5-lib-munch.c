@@ -3182,19 +3182,14 @@ int smblib_set_prop_input_suspend(struct smb_charger *chg,
 				  const union power_supply_propval *val)
 {
 	uid_t uid = from_kuid(&init_user_ns, current_uid());
+	union power_supply_propval btemp = {0, };
+	int batt_temp = -1;
 
 	if (!chg->chg_disable_votable)
 		return -ENODEV;
 
-	/*
-	 * Prevent background Xiaomi system daemons (like micharge running as UID 1000)
-	 * from disabling bypass charging when it was explicitly enabled by user (root UID 0).
-	 */
-	if (chg->bypass_active && val->intval == 0 && uid != 0) {
-		pr_info("SMB5: blocking non-root (uid=%u comm=%s) from disabling bypass\n",
-			uid, current->comm);
-		return 0;
-	}
+	if (!smblib_get_prop_from_bms(chg, POWER_SUPPLY_PROP_TEMP, &btemp))
+		batt_temp = btemp.intval;
 
 	chg->bypass_active = (bool)val->intval;
 
@@ -3205,15 +3200,26 @@ int smblib_set_prop_input_suspend(struct smb_charger *chg,
 			vote(chg->usb_icl_votable, USER_VOTER, false, 0);
 			vote_override(chg->usb_icl_votable, USER_BYPASS_VOTER, true, 3000000);
 		}
-		pr_info("SMB5: true bypass enabled (3A ICL, 0mA to battery)\n");
+		pr_info("SMB5: bypass ON  — batt_temp=%d, fv_uv=%d, uid=%u, comm=%s\n",
+			batt_temp,
+			chg->fv_votable ? get_effective_result(chg->fv_votable) : -1,
+			uid, current->comm);
 	} else {
-		/* Normal charging */
+		/* Normal charging resume: clear bypass votes */
 		vote(chg->chg_disable_votable, USER_BYPASS_VOTER, false, 0);
 		if (chg->usb_icl_votable) {
 			vote(chg->usb_icl_votable, USER_VOTER, false, 0);
 			vote_override(chg->usb_icl_votable, USER_BYPASS_VOTER, false, 0);
 		}
-		pr_info("SMB5: bypass disabled (normal charging resumed)\n");
+		if (chg->six_pin_step_charge_enable && chg->fv_votable) {
+			chg->index_vfloat = 0;
+			vote(chg->fv_votable, SIX_PIN_VFLOAT_VOTER, false, 0);
+			vote(chg->fcc_votable, SIX_PIN_VFLOAT_VOTER, false, 0);
+		}
+		pr_info("SMB5: bypass OFF — batt_temp=%d, fv_uv=%d, uid=%u, comm=%s\n",
+			batt_temp,
+			chg->fv_votable ? get_effective_result(chg->fv_votable) : -1,
+			uid, current->comm);
 	}
 
 	power_supply_changed(chg->batt_psy);
@@ -8805,6 +8811,25 @@ void smblib_usb_plugin_locked(struct smb_charger *chg)
 			power_supply_get_property(chg->cp_sec_psy,
 					POWER_SUPPLY_PROP_TI_RESET_CHECK, &val);
 
+		/*
+		 * FIX: Auto-clear bypass_active on USB unplug.
+		 * If charger is hotplugged while bypass is active, the flag
+		 * stays set and charging never resumes on re-plug. Clear it
+		 * here so a fresh charging session starts on reconnect.
+		 * User can re-enable bypass after charger is reconnected.
+		 */
+		if (chg->bypass_active) {
+			chg->bypass_active = false;
+			vote(chg->chg_disable_votable, USER_BYPASS_VOTER, false, 0);
+			if (chg->usb_icl_votable)
+				vote_override(chg->usb_icl_votable, USER_BYPASS_VOTER, false, 0);
+			if (chg->six_pin_step_charge_enable && chg->fv_votable) {
+				chg->index_vfloat = 0;
+				vote(chg->fv_votable, SIX_PIN_VFLOAT_VOTER, false, 0);
+				vote(chg->fcc_votable, SIX_PIN_VFLOAT_VOTER, false, 0);
+			}
+			pr_info("SMB5: bypass auto-cleared on USB unplug\n");
+		}
 		/* clear chg_awake wakeup source when charger is absent */
 		vote(chg->awake_votable, CHG_AWAKE_VOTER, false, 0);
 	}
