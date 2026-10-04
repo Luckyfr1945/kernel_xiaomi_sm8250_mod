@@ -3182,19 +3182,14 @@ int smblib_set_prop_input_suspend(struct smb_charger *chg,
 				  const union power_supply_propval *val)
 {
 	uid_t uid = from_kuid(&init_user_ns, current_uid());
+	union power_supply_propval btemp = {0, };
+	int batt_temp = -1;
 
 	if (!chg->chg_disable_votable)
 		return -ENODEV;
 
-	/*
-	 * Prevent background Xiaomi system daemons (like micharge running as UID 1000)
-	 * from disabling bypass charging when it was explicitly enabled by user (root UID 0).
-	 */
-	if (chg->bypass_active && val->intval == 0 && uid != 0) {
-		pr_info("SMB5: blocking non-root (uid=%u comm=%s) from disabling bypass\n",
-			uid, current->comm);
-		return 0;
-	}
+	if (!smblib_get_prop_from_bms(chg, POWER_SUPPLY_PROP_TEMP, &btemp))
+		batt_temp = btemp.intval;
 
 	chg->bypass_active = (bool)val->intval;
 
@@ -3205,15 +3200,26 @@ int smblib_set_prop_input_suspend(struct smb_charger *chg,
 			vote(chg->usb_icl_votable, USER_VOTER, false, 0);
 			vote_override(chg->usb_icl_votable, USER_BYPASS_VOTER, true, 3000000);
 		}
-		pr_info("SMB5: true bypass enabled (3A ICL, 0mA to battery)\n");
+		pr_info("SMB5: bypass ON  — batt_temp=%d, fv_uv=%d, uid=%u, comm=%s\n",
+			batt_temp,
+			chg->fv_votable ? get_effective_result(chg->fv_votable) : -1,
+			uid, current->comm);
 	} else {
-		/* Normal charging */
+		/* Normal charging resume: clear bypass votes */
 		vote(chg->chg_disable_votable, USER_BYPASS_VOTER, false, 0);
 		if (chg->usb_icl_votable) {
 			vote(chg->usb_icl_votable, USER_VOTER, false, 0);
 			vote_override(chg->usb_icl_votable, USER_BYPASS_VOTER, false, 0);
 		}
-		pr_info("SMB5: bypass disabled (normal charging resumed)\n");
+		if (chg->six_pin_step_charge_enable && chg->fv_votable) {
+			chg->index_vfloat = 0;
+			vote(chg->fv_votable, SIX_PIN_VFLOAT_VOTER, false, 0);
+			vote(chg->fcc_votable, SIX_PIN_VFLOAT_VOTER, false, 0);
+		}
+		pr_info("SMB5: bypass OFF — batt_temp=%d, fv_uv=%d, uid=%u, comm=%s\n",
+			batt_temp,
+			chg->fv_votable ? get_effective_result(chg->fv_votable) : -1,
+			uid, current->comm);
 	}
 
 	power_supply_changed(chg->batt_psy);
@@ -3527,34 +3533,43 @@ static int smblib_get_screen_on_clamped_level(struct smb_charger *chg, int raw_l
 	union power_supply_propval batt_temp = {0, };
 	int max_level = chg->thermal_levels;
 
+	/*
+	 * Force Fast Charge (Screen ON or OFF):
+	 * Completely unthrottles charging power to full speed (level 0).
+	 * Protects hardware only if battery reaches critical 49.0°C.
+	 */
+	if (chg->force_fast_charge > 0) {
+		smblib_get_prop_from_bms(chg, POWER_SUPPLY_PROP_TEMP, &batt_temp);
+		if (batt_temp.intval >= 490)
+			return raw_level;
+		return 0;
+	}
+
 	if (!chg->screen_on_fast_charge || !chg->screen_is_on)
 		return raw_level;
 
 	smblib_get_prop_from_bms(chg, POWER_SUPPLY_PROP_TEMP, &batt_temp);
 
-	if (chg->screen_on_fast_charge == 2) {
-		/* Turbo Screen-On Fast Charge: up to 45W-50W under 45.0C */
-		if (batt_temp.intval < 450)
-			max_level = 1;
-		else if (batt_temp.intval < 470)
-			max_level = 3;
-		else
-			max_level = chg->thermal_levels;
-	} else {
-		/* Mode 1: Smart Dynamic Anti-Throttling */
-		if (batt_temp.intval < 410)
-			max_level = 1; /* ~45W-50W in PPS, 25W in PD */
-		else if (batt_temp.intval < 440)
-			max_level = 3; /* ~35W in PPS, 22W in PD */
-		else if (batt_temp.intval < 460)
-			max_level = 5; /* ~27W in PPS, 18W in PD */
-		else
-			max_level = chg->thermal_levels; /* Full thermal throttle if >= 46.0C */
-	}
+	/*
+	 * Screen-On Fast Charge:
+	 * Keeps charging wattage gacor (full speed) while using the phone / gaming:
+	 * - Under 45°C: level 0 (Full turbo speed 67W / PPS)
+	 * - 45°C - 47°C: level 1 (~45W-50W PPS)
+	 * - 47°C - 49°C: level 3 (~35W PPS)
+	 * - >= 49°C: fallback to raw thermal level for battery protection
+	 */
+	if (batt_temp.intval < 450)
+		max_level = 0;
+	else if (batt_temp.intval < 470)
+		max_level = 1;
+	else if (batt_temp.intval < 490)
+		max_level = 3;
+	else
+		max_level = chg->thermal_levels;
 
 	if (raw_level > max_level) {
-		pr_info("smb5: Screen-On Fast Charge clamp: raw_lvl=%d -> clamped_lvl=%d (batt_temp=%d, mode=%d)\n",
-			raw_level, max_level, batt_temp.intval, chg->screen_on_fast_charge);
+		pr_info("smb5: Screen-On Fast Charge clamp: raw_lvl=%d -> clamped_lvl=%d (batt_temp=%d, screen_on=%d, force=%d)\n",
+			raw_level, max_level, batt_temp.intval, chg->screen_on_fast_charge, chg->force_fast_charge);
 		return max_level;
 	}
 
@@ -3588,8 +3603,8 @@ int smblib_screen_notifier_cb(struct notifier_block *nb,
 		break;
 	}
 
-	if (chg->screen_on_fast_charge) {
-		if (chg->screen_is_on)
+	if (chg->screen_on_fast_charge || chg->force_fast_charge) {
+		if (chg->screen_is_on || chg->force_fast_charge)
 			chg->system_temp_level = smblib_get_screen_on_clamped_level(chg, chg->raw_system_temp_level);
 		else
 			chg->system_temp_level = chg->raw_system_temp_level;
@@ -3644,21 +3659,21 @@ int smblib_set_force_fast_charge(struct smb_charger *chg, int val)
 		chg->force_fast_charge_ua = 500000;
 		break;
 	case 1:
-		chg->force_fast_charge_ua = 1500000;
-		break;
-	case 2:
 		chg->force_fast_charge_ua = 2000000;
 		break;
-	case 3:
+	case 2:
 		chg->force_fast_charge_ua = 3000000;
 		break;
+	case 3:
+		chg->force_fast_charge_ua = 3500000;
+		break;
 	default:
-		if (val >= 500000 && val <= 3000000)
+		if (val >= 500000 && val <= 3500000)
 			chg->force_fast_charge_ua = val;
-		else if (val > 3000000)
-			chg->force_fast_charge_ua = 3000000;
+		else if (val > 3500000)
+			chg->force_fast_charge_ua = 3500000;
 		else
-			chg->force_fast_charge_ua = 1500000;
+			chg->force_fast_charge_ua = 2000000;
 		break;
 	}
 
@@ -3673,6 +3688,15 @@ int smblib_set_force_fast_charge(struct smb_charger *chg, int val)
 			else
 				vote(chg->usb_icl_votable, USB_PSY_VOTER, true, SDP_CURRENT_UA);
 		}
+	}
+
+	/* Re-evaluate thermal and fast charge levels across all charger types */
+	chg->system_temp_level = smblib_get_screen_on_clamped_level(chg, chg->raw_system_temp_level);
+	if (chg->pd_active == POWER_SUPPLY_PD_PPS_ACTIVE) {
+		chg->pps_thermal_level = chg->system_temp_level;
+		schedule_delayed_work(&chg->thermal_setting_work, 0);
+	} else {
+		smblib_therm_charging(chg);
 	}
 
 	return 0;
@@ -8787,6 +8811,25 @@ void smblib_usb_plugin_locked(struct smb_charger *chg)
 			power_supply_get_property(chg->cp_sec_psy,
 					POWER_SUPPLY_PROP_TI_RESET_CHECK, &val);
 
+		/*
+		 * FIX: Auto-clear bypass_active on USB unplug.
+		 * If charger is hotplugged while bypass is active, the flag
+		 * stays set and charging never resumes on re-plug. Clear it
+		 * here so a fresh charging session starts on reconnect.
+		 * User can re-enable bypass after charger is reconnected.
+		 */
+		if (chg->bypass_active) {
+			chg->bypass_active = false;
+			vote(chg->chg_disable_votable, USER_BYPASS_VOTER, false, 0);
+			if (chg->usb_icl_votable)
+				vote_override(chg->usb_icl_votable, USER_BYPASS_VOTER, false, 0);
+			if (chg->six_pin_step_charge_enable && chg->fv_votable) {
+				chg->index_vfloat = 0;
+				vote(chg->fv_votable, SIX_PIN_VFLOAT_VOTER, false, 0);
+				vote(chg->fcc_votable, SIX_PIN_VFLOAT_VOTER, false, 0);
+			}
+			pr_info("SMB5: bypass auto-cleared on USB unplug\n");
+		}
 		/* clear chg_awake wakeup source when charger is absent */
 		vote(chg->awake_votable, CHG_AWAKE_VOTER, false, 0);
 	}
@@ -12789,7 +12832,7 @@ int smblib_init(struct smb_charger *chg)
 	chg->screen_is_on = true;
 	chg->screen_on_fast_charge = 1;
 	chg->raw_system_temp_level = 0;
-	chg->force_fast_charge = 0;
+	chg->force_fast_charge = 1;
 	chg->force_fast_charge_ua = 3000000;
 #if (!defined CONFIG_FUEL_GAUGE_BQ27Z561_MUNCH) && (!defined CONFIG_DUAL_FUEL_GAUGE_BQ27Z561)
 	chg->esr_work_status = ESR_CHECK_FCC_NOLIMIT;
