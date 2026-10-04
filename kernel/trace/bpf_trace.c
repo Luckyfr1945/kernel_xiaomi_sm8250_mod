@@ -975,6 +975,21 @@ const struct bpf_verifier_ops raw_tracepoint_verifier_ops = {
 const struct bpf_prog_ops raw_tracepoint_prog_ops = {
 };
 
+const struct bpf_verifier_ops raw_tracepoint_writable_verifier_ops = {
+	.get_func_proto  = raw_tp_prog_func_proto,
+	.is_valid_access = raw_tp_prog_is_valid_access,
+};
+
+const struct bpf_prog_ops raw_tracepoint_writable_prog_ops = {
+};
+
+const struct bpf_verifier_ops tracing_verifier_ops = {
+	.get_func_proto  = raw_tp_prog_func_proto,
+	.is_valid_access = raw_tp_prog_is_valid_access,
+};
+
+const struct bpf_prog_ops tracing_prog_ops = {
+};
 static bool pe_prog_is_valid_access(int off, int size, enum bpf_access_type type,
 				    const struct bpf_prog *prog,
 				    struct bpf_insn_access_aux *info)
