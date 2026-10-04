@@ -7,17 +7,19 @@
 
 ---
 
-## v1.4 P6 (KCAL Color Calibration & KSU Build Fix)
+## v1.4 P6 (KCAL Color Calibration & KernelSU SuSFS Fix)
 • KCAL Advanced Color Calibration:
   - Implemented guarded KCAL driver via Qualcomm SDE DSPP PCC hardware
   - Exposes sysfs interface at `/sys/devices/platform/kcal_ctrl.0/` compatible with standard KCAL apps
   - Supports: RGB (`kcal`), saturation (`kcal_sat`), brightness (`kcal_val`), contrast (`kcal_cont`), hue (`kcal_hue`), invert (`kcal_invert`), min value (`kcal_min`)
+  - Auto-enables on slider adjustments and auto-reapplies on display resume
+  - Full hardware configuration setup across active DSPP blocks and color management pipelines
   - Safety guards: skips PCC updates during FOD/HBM fingerprint overlay to prevent display freeze
-  - Disabled by default (passthrough/identity matrix) — zero overhead when off
-• KernelSU Build Fix:
-  - Switched from `CONFIG_KSU_TRACEPOINT_HOOK` to `CONFIG_KSU_MANUAL_HOOK` — tracepoint hooks only support GKI 2.0 (5.10+), not 4.19
-  - Added missing `ksu_handle_newfstat_ret` and `ksu_handle_fstat64_ret` hooks to `fs/stat.c`
-  - Fixed undefined reference to `ksu_is_init_rc_hook_enabled` in `fs/read_write.c` (SUSFS-only symbol used under wrong `#ifdef`)
+• KernelSU + SuSFS Root Restoration:
+  - Reverted unintended manual hook switch and restored native SuSFS inline hooks (`CONFIG_KSU_SUSFS=y`)
+  - Restored proper `ksu_handle_sys_read` and `ksu_is_init_rc_hook_enabled` hooks in `fs/read_write.c`
+  - Cleaned up manual hook artifacts from `fs/stat.c`
+  - Fixed KernelSU root detection so manager properly recognizes root without "Unsupported" state
 
 ---
 

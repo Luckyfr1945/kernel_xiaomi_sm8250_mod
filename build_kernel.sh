@@ -221,7 +221,16 @@ build_target() {
         scripts/config --file "${OUT_DIR}/.config" \
             -e KSU \
             -e THREAD_INFO_IN_TASK \
-            -e KSU_SUSFS
+            -e KSU_SUSFS \
+            -d KSU_MANUAL_HOOK \
+            -d KSU_TRACEPOINT_HOOK
+    else
+        echo "[*] Disabling KernelSU..."
+        scripts/config --file "${OUT_DIR}/.config" \
+            -d KSU \
+            -d KSU_SUSFS \
+            -d KSU_MANUAL_HOOK \
+            -d KSU_TRACEPOINT_HOOK
     fi
 
     # 3. MIUI configurations
