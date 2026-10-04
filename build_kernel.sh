@@ -107,7 +107,7 @@ fi
 echo "==========================================="
 echo " [*] Initializing Baseband-guard Setup"
 echo "==========================================="
-if [ ! -d "Baseband-guard" ] || [ ! -L "security/baseband-guard" ]; then
+if [ ! -d "security/baseband-guard" ]; then
     echo "[*] Downloading and running Baseband-guard remote setup script..."
     wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
 
