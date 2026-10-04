@@ -347,6 +347,9 @@ build_target() {
         echo "[+] $OS_TYPE Build Successful!"
         echo "[+] Kernel Image path: ${OUT_DIR}/arch/arm64/boot/Image"
 
+        echo "[*] Generating dtb..."
+        find "${OUT_DIR}/arch/arm64/boot/dts" -name '*.dtb' -exec cat {} + > "${OUT_DIR}/arch/arm64/boot/dtb"
+
         echo "[*] Packaging to AnyKernel3 ($OS_TYPE)..."
         # 确保独立打包：清空现有的 kernels 目录
         rm -rf anykernel/kernels/*
