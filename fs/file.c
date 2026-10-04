@@ -18,6 +18,7 @@
 #include <linux/bitops.h>
 #include <linux/spinlock.h>
 #include <linux/rcupdate.h>
+#include <linux/close_range.h>
 
 unsigned int sysctl_nr_open __read_mostly = 1024*1024;
 unsigned int sysctl_nr_open_min = BITS_PER_LONG;
@@ -643,6 +644,60 @@ out_unlock:
 	return -EBADF;
 }
 EXPORT_SYMBOL(__close_fd); /* for ksys_close() */
+
+/**
+ * __close_range() - Close all file descriptors in a given range.
+ *
+ * @fd:     starting file descriptor to close
+ * @max_fd: last file descriptor to close
+ * @flags:  flags (CLOSE_RANGE_UNSHARE, CLOSE_RANGE_CLOEXEC)
+ *
+ * This closes a range of file descriptors. All file descriptors
+ * from @fd up to and including @max_fd are closed.
+ */
+int __close_range(unsigned int fd, unsigned int max_fd, unsigned int flags)
+{
+	unsigned int cur;
+
+	if (flags & ~(CLOSE_RANGE_UNSHARE | CLOSE_RANGE_CLOEXEC))
+		return -EINVAL;
+
+	if (fd > max_fd)
+		return -EINVAL;
+
+	if (flags & CLOSE_RANGE_UNSHARE) {
+		int ret;
+		struct files_struct *displaced = NULL;
+
+		ret = unshare_files(&displaced);
+		if (ret)
+			return ret;
+		if (displaced)
+			put_files_struct(displaced);
+	}
+
+	rcu_read_lock();
+	cur = min(max_fd, files_fdtable(current->files)->max_fds - 1);
+	rcu_read_unlock();
+
+	for (; cur >= fd; cur--) {
+		if (flags & CLOSE_RANGE_CLOEXEC) {
+			spin_lock(&current->files->file_lock);
+			if (cur < files_fdtable(current->files)->max_fds &&
+			    fcheck_files(current->files, cur)) {
+				__set_close_on_exec(cur, files_fdtable(current->files));
+			}
+			spin_unlock(&current->files->file_lock);
+		} else {
+			int ret = __close_fd(current->files, cur);
+			if (!ret)
+				cond_resched();
+		}
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(__close_range);
 
 void do_close_on_exec(struct files_struct *files)
 {
