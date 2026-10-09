@@ -184,6 +184,12 @@ apply_ksu_config() {
             -d KSU_TRACEPOINT_HOOK \
             -d KSU_SUSFS
     fi
+
+    # Enforce Android 15/16/17 BPF loader compatibility
+    scripts/config --file out/.config \
+        -e SECURITYFS \
+        -e SPOOF_KERNEL_VERSION \
+        --set-str SPOOF_KERNEL_VERSION_STRING "5.10.239-ki-kernel-v1.4"
 }
 
 echo "Cleaning build directories..."

@@ -56,7 +56,7 @@ static int proc_do_uts_string(struct ctl_table *table, int write,
 #ifdef CONFIG_SPOOF_KERNEL_VERSION_STRING
 #define UTS_RELEASE_SPOOFED CONFIG_SPOOF_KERNEL_VERSION_STRING
 #else
-#define UTS_RELEASE_SPOOFED "5.15.148-ki-kernel-v1.4"
+#define UTS_RELEASE_SPOOFED "5.10.239-ki-kernel-v1.4"
 #endif
 	if (table->data == init_uts_ns.name.release &&
 	    likely(current->pid != 1 && strcmp(current->comm, "init"))) {

@@ -1406,6 +1406,8 @@ static int bpf_prog_load(union bpf_attr *attr)
 
 	if (type == BPF_PROG_TYPE_KPROBE &&
 	    attr->kern_version != LINUX_VERSION_CODE &&
+	    attr->kern_version != KERNEL_VERSION(5, 10, 0) &&
+	    attr->kern_version != KERNEL_VERSION(5, 10, 239) &&
 	    attr->kern_version != KERNEL_VERSION(5, 15, 0))
 		return -EINVAL;
 
